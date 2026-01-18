@@ -1,0 +1,17 @@
+credentials:
+  usernames:
+    admin:
+      email: aathyanthlekshman@gmail.com
+      name: Aathyanth Lekshman Prabu Krishna Veni
+      password: Putbest17 # You can change this
+    testuser:
+      email: aathyanthlpkv@gmail.com
+      name: Test User
+      password: 123
+cookie:
+  expiry_days: 30
+  key: some_signature_key
+  name: some_cookie_name
+preauthorized:
+  emails:
+    - aathyanthlekshman@gmail.com

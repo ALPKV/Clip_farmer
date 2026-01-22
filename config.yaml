@@ -2,16 +2,14 @@ credentials:
   usernames:
     admin:
       email: aathyanthlekshman@gmail.com
-      name: Aathyanth Lekshman Prabu Krishna Veni
-      password: Putbest17 # You can change this
+      name: Admin User
+      password: $2b$12$tSg13sJX..hwJas2TGaaNuApOxjfeoSQjgzYEagQeOI/rP/6xY69O
     testuser:
       email: aathyanthlpkv@gmail.com
       name: Test User
-      password: 123
+      password: $2b$12$JuTd5lcgPHn.Z81oTr32POlWsSTf1oqYiAhCUDwkdxsrj1XcTg1ZW
+
 cookie:
   expiry_days: 30
   key: some_signature_key
   name: some_cookie_name
-preauthorized:
-  emails:
-    - aathyanthlekshman@gmail.com

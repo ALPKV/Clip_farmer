@@ -1,3 +1,4 @@
-opencv-python
-moviepy
-numpy
+streamlit
+librosa
+streamlit-authenticator
+pyyaml

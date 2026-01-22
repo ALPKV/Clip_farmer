@@ -1,13 +1,17 @@
-# Cricket Clip Autocropper
+# 🚜 Clip Farmer Pro
+**AI-Powered Sports Highlight Generation**
 
-## Objective
-To automatically detect the moment a ball is hit in a cricket net video and crop a 5-second highlight.
+Clip Farmer Pro is a professional tool designed to scan match footage, detect high-action moments via audio analysis, and automatically generate highlight reels.
 
-## Proposed Methods
-- **Visual Detection:** Use OpenCV to track the ball's motion.
-- **Audio Detection:** Use decibel peaks to find the "clack" of the bat.
+## 🛠️ Tech Stack
+- **Frontend:** Streamlit
+- **Audio Processing:** Librosa
+- **Video Engine:** FFmpeg
+- **Authentication:** Streamlit-Authenticator
 
-## To-Do List
-- [ ] Upload sample video
-- [ ] Write motion detection script
-- [ ] Test cropping logic
+## 🚀 Local Development (VS Code)
+1. **Setup Environment:**
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # On Mac
+   pip install -r requirements.txt

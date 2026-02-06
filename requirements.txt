@@ -2,3 +2,4 @@ streamlit
 librosa
 streamlit-authenticator
 pyyaml
+ffmpeg-python

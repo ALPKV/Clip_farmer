@@ -234,8 +234,8 @@ export function ToggleTracking({ on, onChange }: { on: boolean; onChange: (on: b
       onClick={() => onChange(!on)}
       className="group inline-flex items-center gap-2.5 px-2 py-1 font-display text-sm font-bold uppercase tracking-wider"
     >
-      <span className={`relative h-5 w-9 transition-colors ${on ? "bg-gold" : "bg-white/20"}`}>
-        <span className={`absolute top-0.5 h-4 w-4 bg-navy-950 transition-transform ${on ? "translate-x-[18px]" : "translate-x-0.5"}`} />
+      <span aria-hidden className={`relative inline-block h-5 w-9 shrink-0 transition-colors ${on ? "bg-gold" : "bg-white/20"}`}>
+        <span className={`absolute left-0 top-0.5 block h-4 w-4 bg-navy-950 transition-transform ${on ? "translate-x-[18px]" : "translate-x-0.5"}`} />
       </span>
       Speed &amp; ball tracking {on ? "on" : "off"}
     </button>

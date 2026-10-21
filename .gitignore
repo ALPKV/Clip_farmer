@@ -127,3 +127,21 @@ dmypy.json
 .Trashes
 ehthumbs.db
 Thumbs.db
+# ==========================================
+# Flipper (Next.js)
+# ==========================================
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+.vercel
+.env*.local
+# Local development database (PGlite)
+.data/
+# Sample videos for local testing only
+public/dev-samples/
+# FFmpeg.wasm browser files, copied from node_modules on dev/build
+public/vendor/
+# Local editor/agent settings
+.claude/

@@ -16,8 +16,23 @@ type Runner = (text: string, params: unknown[]) => Promise<Row[]>;
 // more than once, and two embedded databases on the same folder would not see each other's writes).
 const shared = globalThis as typeof globalThis & { __flipperDb?: Promise<Runner> | null };
 
+/**
+ * The Postgres URL. Vercel's Neon integration names it DATABASE_URL by default, but a custom
+ * prefix in the "Connect" dialog gives names like STORAGE_DATABASE_URL, so accept those too.
+ */
+export function databaseUrl(): string | undefined {
+  const env = process.env;
+  if (env.DATABASE_URL) return env.DATABASE_URL;
+  if (env.POSTGRES_URL) return env.POSTGRES_URL;
+  const key = Object.keys(env)
+    .filter((k) => /(DATABASE|POSTGRES)_URL$/.test(k) && !/UNPOOLED|NON_POOLING/.test(k))
+    .sort()
+    .find((k) => /^postgres(ql)?:\/\//.test(env[k] ?? ""));
+  return key ? env[key] : undefined;
+}
+
 async function connect(): Promise<Runner> {
-  const url = process.env.DATABASE_URL ?? process.env.POSTGRES_URL;
+  const url = databaseUrl();
   if (url) {
     // prepare:false works with Neon's pooled (PgBouncer) connection string.
     const sql = postgres(url, { max: 3, prepare: false, idle_timeout: 20, ssl: "require" });

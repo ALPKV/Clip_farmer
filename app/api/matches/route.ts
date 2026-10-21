@@ -1,6 +1,10 @@
 import { body, json, route } from "@/lib/api";
+import { listMatches } from "@/lib/data";
 import { query } from "@/lib/db";
 import { Match } from "@/lib/schemas";
+
+/** The signed-in player's matches, newest first. */
+export const GET = route(async ({ user }) => json({ matches: await listMatches(user.id) }));
 
 export const POST = route(async ({ req, user }) => {
   const m = await body(req, Match);

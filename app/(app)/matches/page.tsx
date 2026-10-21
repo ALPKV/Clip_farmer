@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { TrendChart } from "@/components/charts";
-import { DeleteMatch, MatchForm } from "@/components/match-form";
+import { DeleteMatch, HowOut, MatchForm } from "@/components/match-form";
 import { Container, Empty, Meter, PageHeader, Panel, Stat, fmt } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { listMatches, serverToday } from "@/lib/data";
@@ -103,7 +103,7 @@ export default async function MatchesPage() {
                       <td className="px-2 py-2 text-slate">{m.format}</td>
                       <td className="px-2 py-2 font-display text-base font-bold text-navy">{m.batted ? `${m.runs}${m.not_out ? "*" : ""} (${m.balls_faced})` : "DNB"}</td>
                       <td className="px-2 py-2 tabular-nums">{m.batted ? fmt.num(strikeRate(m.runs, m.balls_faced), 0) : "—"}</td>
-                      <td className="px-2 py-2 text-slate">{m.dismissal || (m.not_out ? "not out" : "—")}</td>
+                      <td className="px-2 py-2 text-slate">{!m.batted ? "—" : m.not_out ? "not out" : <HowOut id={m.id} dismissal={m.dismissal} />}</td>
                       <td className="px-2 py-2 tabular-nums">{m.balls_bowled ? `${m.wickets}/${m.runs_conceded} (${oversText(m.balls_bowled)})` : "—"}</td>
                       <td className="px-2 py-2 tabular-nums">{fmt.num(economy(m.runs_conceded, m.balls_bowled), 2)}</td>
                       <td className="px-4 py-2 text-right"><DeleteMatch id={m.id} /></td>

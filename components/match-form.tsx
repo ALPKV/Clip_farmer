@@ -94,6 +94,26 @@ export function MatchForm({ today }: { today: string }) {
   );
 }
 
+/** Lets the player add the mode of dismissal to an innings that was logged without one. */
+export function HowOut({ id, dismissal }: { id: string; dismissal: string }) {
+  const { send, busy } = useSend();
+  if (dismissal) return <>{dismissal}</>;
+  return (
+    <select
+      className="border border-dashed border-navy/40 bg-white px-1 py-0.5 text-xs text-slate"
+      defaultValue=""
+      disabled={busy}
+      aria-label="How out"
+      onChange={(e) => e.target.value && void send("PATCH", `/api/matches/${id}`, { dismissal: e.target.value })}
+    >
+      <option value="">Add how out</option>
+      {DISMISSALS.map((d) => (
+        <option key={d}>{d}</option>
+      ))}
+    </select>
+  );
+}
+
 export function DeleteMatch({ id }: { id: string }) {
   const { send } = useSend();
   return (

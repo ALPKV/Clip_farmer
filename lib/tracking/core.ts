@@ -35,6 +35,8 @@ export type DetectOptions = {
   /** Optional trained ball / not-ball model and how much its opinion counts when ranking blobs. */
   scorer?: Scorer;
   scoreWeight?: number;
+  /** With a scorer: drop blobs scoring below this log-odds before tracking. */
+  minScore?: number;
 };
 
 export function defaultDetectOptions(w: number, h: number): DetectOptions {
@@ -128,10 +130,16 @@ export function detect(prev: Gray, cur: Gray, next: Gray, opt: DetectOptions): C
     c.crowd = 0;
     for (const d of out) if (d !== c && (d.x - c.x) ** 2 + (d.y - c.y) ** 2 < crowdR2) c.crowd++;
   }
-  if (opt.scorer) for (const c of out) c.score = opt.scorer(prev, cur, next, c);
   const sw = opt.scoreWeight ?? 0.05;
-  out.sort((p, q) => rank(q, sw) - rank(p, sw));
-  return out.slice(0, opt.maxCandidates);
+  let kept = out;
+  if (opt.scorer) {
+    // Score only the most promising blobs; netting and crowds can produce hundreds per frame.
+    kept = out.sort((p, q) => rank(q, 0) - rank(p, 0)).slice(0, Math.max(40, opt.maxCandidates * 3));
+    for (const c of kept) c.score = opt.scorer(prev, cur, next, c);
+    if (opt.minScore != null) kept = kept.filter((c) => (c.score ?? 0) >= opt.minScore!);
+  }
+  kept.sort((p, q) => rank(q, sw) - rank(p, sw));
+  return kept.slice(0, opt.maxCandidates);
 }
 
 const clampScore = (s: number | undefined) => Math.max(-6, Math.min(6, s ?? 0));

@@ -2,19 +2,17 @@ import type { Candidate, Gray } from "./core.ts";
 import weights from "./ball-model.json" with { type: "json" };
 
 /**
- * A small ball / not-ball classifier (logistic regression) trained on hand-checked crops from
- * real net-session videos. It looks at a 9×9 patch around each moving blob, the motion inside
- * it, and the blob's shape, and returns a log-odds score: above 0 looks like a ball.
- *
- * It was trained on little data (2 videos) and scores about 0.71–0.79 AUC on unseen footage,
- * so the tracker uses it as a nudge, not a filter. Retrain with more footage to improve it.
+ * A small ball / not-ball classifier (logistic regression) trained on hand-reviewed ball flights
+ * from real net-session and match videos. It looks at a 9×9 patch around each moving blob, the
+ * motion inside it, and the blob's shape, and returns a log-odds score: above 0 looks like a ball.
+ * On footage it never saw it scores 0.90–0.96 AUC. See scripts/ball-model/README.md.
  */
 
 export type BallModel = { patch: number; mu: number[]; sd: number[]; w: number[]; b: number };
 
 export const ballModel: BallModel = weights;
 
-/** Features must match the training script exactly (scripts/train-ball-model). */
+/** Features must match the training script exactly (scripts/ball-model). */
 export function ballFeatures(prev: Gray, cur: Gray, next: Gray, c: Candidate, patchSize = 9): number[] {
   const { w: W, h: H } = cur;
   const R = (patchSize - 1) / 2;

@@ -51,7 +51,8 @@ for (let i = 1; i < nFrames - 1; i++) {
 cands.push([]); times.push((nFrames - 1) / fps);
 
 // Sliding windows: the best track in each window marks ball blobs.
-const pos = new Set<string>();
+const pos = new Map<string, number>();
+const trackList: { pts: { i: number; x: number; y: number }[] }[] = [];
 const key = (i: number, x: number, y: number) => `${i}:${x.toFixed(1)}:${y.toFixed(1)}`;
 const WIN = Math.round(fps * 1.6), STEP = Math.round(fps * 0.4);
 let tracks = 0;
@@ -65,17 +66,19 @@ for (let s = 0; s + WIN < cands.length; s += STEP) {
   const crowd = pts.reduce((a, p) => a + p.crowd, 0) / pts.length;
   if (path < 40 || reversals > 1 || crowd > 1.5) continue;
   tracks++;
-  for (const p of pts) pos.add(key(p.i + s, p.x, p.y));
+  const id = trackList.length;
+  trackList.push({ pts: pts.map((p) => ({ i: p.i + s, x: Math.round(p.x), y: Math.round(p.y) })) });
+  for (const p of pts) if (!pos.has(key(p.i + s, p.x, p.y))) pos.set(key(p.i + s, p.x, p.y), id);
 }
 
-const rows: { v: string; i: number; x: number; y: number; label: number }[] = [];
+const rows: { v: string; i: number; x: number; y: number; label: number; track: number }[] = [];
 const feats: number[] = [];
 for (const fc of cands) for (const c of fc) {
-  const label = pos.has(key(c.i, c.x, c.y)) ? 1 : 0;
-  rows.push({ v: name, i: c.i, x: c.x, y: c.y, label });
+  const tid = pos.get(key(c.i, c.x, c.y));
+  rows.push({ v: name, i: c.i, x: c.x, y: c.y, label: tid === undefined ? 0 : 1, track: tid ?? -1 });
   feats.push(...c.feat);
 }
 const dim = cands.find((f) => f.length)![0].feat.length;
 writeFileSync(`${file}.feat.bin`, Buffer.from(new Float32Array(feats).buffer));
-writeFileSync(`${file}.meta.json`, JSON.stringify({ dim, rows }));
+writeFileSync(`${file}.meta.json`, JSON.stringify({ dim, rows, tracks: trackList }));
 console.log(name, "frames", nFrames, "candidates", rows.length, "ball", rows.filter((r) => r.label).length, "tracks", tracks, "dim", dim);

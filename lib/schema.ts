@@ -112,4 +112,20 @@ create table if not exists deliveries (
   created_at timestamptz not null default now()
 );
 create index if not exists deliveries_user_date on deliveries(user_id, date);
+
+-- Opt-in ball-tracking training data: numbers describing moving spots, never video or images.
+alter table users add column if not exists share_training boolean not null default false;
+create table if not exists training_samples (
+  id bigserial primary key,
+  user_id uuid not null references users(id) on delete cascade,
+  label smallint not null,
+  source text not null,
+  features real[] not null,
+  frame_w smallint,
+  frame_h smallint,
+  fps real,
+  model_version text not null default '',
+  created_at timestamptz not null default now()
+);
+create index if not exists training_samples_user on training_samples(user_id, created_at);
 `;

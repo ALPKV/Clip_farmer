@@ -19,6 +19,8 @@ export type User = {
   weight_kg: number | null;
   season_start: string | null;
   season_end: string | null;
+  /** Opted in to sharing ball-tracking numbers to improve the model. */
+  share_training: boolean;
 };
 
 export async function hashPassword(password: string): Promise<string> {
@@ -69,7 +71,8 @@ export async function currentUser(): Promise<User | null> {
   return queryOne<User>(
     `select u.id, u.email, u.name, u.role, u.weight_kg,
             to_char(u.season_start, 'YYYY-MM-DD') as season_start,
-            to_char(u.season_end, 'YYYY-MM-DD') as season_end
+            to_char(u.season_end, 'YYYY-MM-DD') as season_end,
+            u.share_training
        from auth_sessions s join users u on u.id = s.user_id
       where s.token_hash = $1 and s.expires_at > now()`,
     [tokenHash(token)],

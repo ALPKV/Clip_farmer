@@ -19,9 +19,10 @@ export default async function TrackingPage() {
         <p role="note" className="mb-5 border-l-4 border-gold bg-gold/10 px-4 py-3 text-sm text-ink">
           <b className="font-display uppercase tracking-wide text-navy">Work in progress.</b> Ball tracking is still being
           trained and improved, so it won&apos;t find the ball on every delivery yet. You can still try it, and you can
-          always mark the release and bounce by hand to get speed and length.
+          always mark the release and bounce by hand to get speed and length. To help train it, turn on sharing in your
+          Profile and answer &ldquo;Is the yellow path the ball?&rdquo; after tracking.
         </p>
-        <BallTracking deliveries={deliveries} today={today} />
+        <BallTracking deliveries={deliveries} today={today} shareTraining={user.share_training} />
       </Container>
     </>
   );

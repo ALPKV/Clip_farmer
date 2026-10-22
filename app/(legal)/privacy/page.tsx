@@ -33,6 +33,29 @@ export default function PrivacyPage() {
         </ul>
       </Section>
 
+      <Section title="Optional: helping train ball tracking" id="training">
+        <p>
+          Sharing is <b>off</b> unless you turn it on in your Profile. When it&apos;s on and you answer &ldquo;Is the
+          yellow path the ball?&rdquo; after tracking a delivery, Flipper sends numbers describing the spots it
+          tracked, labelled with your answer. Up to 200 sets per answer, each with:
+        </p>
+        <ul>
+          <li>the spot&apos;s size and shape, how bright it is and how crowded its surroundings are;</li>
+          <li>
+            a 9&times;9-pixel greyscale square around the spot, from a copy of the frame shrunk to 360 pixels wide, with
+            its brightness evened out, and how much each of those pixels moved. The square is about the size of the
+            ball, far too small and blurry to show a face, a person or a place;
+          </li>
+          <li>the frame size, the frame rate and which version of the model chose the spots.</li>
+        </ul>
+        <p>
+          Never shared: the video, whole frames, the file name, when in the video it happened, or anything else about
+          you. Shared samples are linked to your account only so you can delete them and so no one can flood the
+          training set. They are used only to train Flipper&apos;s ball model. Turn sharing off at any time, and choose
+          whether to delete what you shared. Deleting your account deletes it too.
+        </p>
+      </Section>
+
       <Section title="What Flipper stores">
         <ul>
           <li><b>Account:</b> your name, email address and password. The password is stored only as a salted scrypt hash, never as text.</li>
@@ -41,6 +64,7 @@ export default function PrivacyPage() {
             <b>What you log:</b> practice sessions, match logs and dismissals, goals, carb logs, mindset entries,
             inventory and saved deliveries.
           </li>
+          <li><b>If you opt in:</b> the ball-tracking numbers described above.</li>
           <li><b>Sign-in:</b> a session record, so you stay signed in, kept for as long as the session lasts or until you sign out.</li>
           <li>
             <b>Abuse protection:</b> a count of recent sign-in attempts per email address and of sign-ups per network
@@ -63,8 +87,9 @@ export default function PrivacyPage() {
       <Section title="How it is used">
         <p>
           Your data is used only to run Flipper for you: to show your plans, workload, goals and results. It is not
-          sold, rented or shared for advertising, and it is not used to train AI models. No one else can see your
-          account.
+          sold, rented or shared for advertising, and your logs are never used to train AI models. The only training
+          data is the optional ball-tracking numbers described above, used for Flipper&apos;s own ball model. No one
+          else can see your account.
         </p>
       </Section>
 

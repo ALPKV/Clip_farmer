@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { detect, defaultDetectOptions, defaultTrackOptions, findBounce, track, type Gray, type TrackPoint } from "../lib/tracking/core.ts";
+import { analyzeFrames } from "../lib/tracking/analyze.ts";
 import { combineDeliveries, motionPeaks } from "../lib/tracking/deliveries.ts";
+import { FEATURE_COUNT } from "../lib/tracking/model.ts";
 import { findImpacts, groupDeliveries, refineContact } from "../lib/tracking/hits.ts";
 import { CREASE_TO_CREASE_M, DEFAULT_SETUP, lengthM, lineCm, speedKmh } from "../lib/tracking/metrics.ts";
 
@@ -60,6 +62,22 @@ test("tracks a synthetic ball with a bounce and finds the bounce", () => {
   const b = findBounce(pts);
   assert.ok(b, "bounce not found");
   assert.ok(Math.abs(b.t - times[bounceAt]) <= 1.01 / 60, `bounce at ${b.t}`);
+});
+
+test("collects model features for the tracked path, only when asked", () => {
+  const w = 200;
+  const h = 300;
+  const n = 20;
+  const frames = Array.from({ length: n }, (_, i) => {
+    const g = blank(w, h);
+    dot(g, 20 + i * 8, 60 + i * 9, 3);
+    return g;
+  });
+  const times = frames.map((_, i) => i / 60);
+  assert.equal(analyzeFrames(frames, times, null, { useModel: false }).training, null);
+  const a = analyzeFrames(frames, times, null, { useModel: false, collect: true });
+  assert.ok(a.training && a.training.track.length >= 10, `only ${a.training?.track.length} track samples`);
+  for (const f of a.training!.track) assert.equal(f.length, FEATURE_COUNT);
 });
 
 test("finds every shot, even two seconds apart, and folds the net thud into its shot", async () => {

@@ -12,9 +12,9 @@ export function LegalTitle({ title, updated, children }: { title: string; update
   );
 }
 
-export function Section({ title, children }: { title: string; children: ReactNode }) {
+export function Section({ title, id, children }: { title: string; id?: string; children: ReactNode }) {
   return (
-    <section className="mt-8">
+    <section id={id} className="mt-8 scroll-mt-6">
       <h2 className="display text-2xl font-extrabold text-navy">{title}</h2>
       <div className="mt-2 space-y-3 text-[0.98rem] leading-relaxed text-ink [&_a]:font-semibold [&_a]:text-navy [&_a]:underline [&_li]:ml-5 [&_li]:list-disc [&_ul]:space-y-1.5">
         {children}

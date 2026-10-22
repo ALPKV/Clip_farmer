@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { Delivery } from "@/lib/data";
 import { lengthZone } from "@/lib/domain";
 import { CREASE_TO_CREASE_M, PITCH_M } from "@/lib/tracking/metrics";
+import { TrackFeedback } from "../training-sharing";
 import { FormError, useSend } from "../use-send";
 import { Button, Empty, Meter, Panel, Stat, Tag, fmt } from "../ui";
 import { PitchMap } from "./pitch-map";
@@ -17,7 +18,7 @@ const MARKS: { key: MarkKey; label: string; help: string }[] = [
   { key: "contact", label: "Contact", help: "Bat on ball. Auto-filled from the loudest sound; check it's the bat." },
 ];
 
-export function BallTracking({ deliveries, today }: { deliveries: Delivery[]; today: string }) {
+export function BallTracking({ deliveries, today, shareTraining }: { deliveries: Delivery[]; today: string; shareTraining: boolean }) {
   const v = useVideo();
   const { send, busy, error } = useSend();
   const [calibrating, setCalibrating] = useState<number[] | null>(null);
@@ -147,6 +148,7 @@ export function BallTracking({ deliveries, today }: { deliveries: Delivery[]; to
                     {analysis.fps < 50 ? " Faster frame rates (60–240 fps) give sharper timings." : ""}
                   </p>
                 ) : null}
+                {analysis ? <TrackFeedback key={clip.id} analysis={analysis} share={shareTraining} /> : null}
                 <div className="divide-y divide-line">
                   {MARKS.map(({ key, label, help }) => {
                     const mk = marks?.[key];

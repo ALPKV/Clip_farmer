@@ -28,7 +28,16 @@ export type BallAnalysis = {
   /** Why the release could not be found automatically, if it could not. */
   releaseNote: string | null;
   fps: number;
+  /**
+   * Model features of the tracked path and of other moving spots in the same frames. Kept in memory
+   * only; shared (as numbers) when the player has opted in and says whether the path is the ball.
+   */
+  training: { track: number[][]; others: number[][]; w: number; h: number } | null;
 };
+
+/** At most this many other spots per frame, and in total, go with a path as "not the ball". */
+const OTHERS_PER_FRAME = 2;
+const MAX_OTHERS = 80;
 
 /**
  * Tracks the ball through `frames` (timestamps `times`, seconds). With a known bat contact the
@@ -38,7 +47,7 @@ export function analyzeFrames(
   frames: Gray[],
   times: number[],
   contact: number | null,
-  { useModel = true }: { useModel?: boolean } = {},
+  { useModel = true, collect = false }: { useModel?: boolean; collect?: boolean } = {},
 ): BallAnalysis {
   const n = frames.length;
   const dt = n > 1 ? (times[n - 1] - times[0]) / (n - 1) : 1 / 30;
@@ -61,6 +70,25 @@ export function analyzeFrames(
   // A path that stops well before the contact belongs to something else (often the previous ball).
   if (contact != null && pts.length && contact - pts[pts.length - 1].t > MAX_GAP_TO_CONTACT) pts = [];
 
+  let training: BallAnalysis["training"] = null;
+  if (collect && pts.length) {
+    const track: number[][] = [];
+    const others: number[][] = [];
+    for (const p of pts) {
+      if (p.i < 1 || p.i >= last) continue;
+      const here = cands[p.i];
+      const own = here.find((c) => Math.hypot(c.x - p.x, c.y - p.y) <= 1.5);
+      // Points filled in across a gap or a bounce have no blob of their own.
+      if (!own) continue;
+      const feats = (c: (typeof here)[number]) => ballFeatures(frames[p.i - 1], frames[p.i], frames[p.i + 1], c);
+      track.push(feats(own));
+      for (const c of here.filter((c) => Math.hypot(c.x - p.x, c.y - p.y) > 6).slice(0, OTHERS_PER_FRAME)) {
+        if (others.length < MAX_OTHERS) others.push(feats(c));
+      }
+    }
+    training = { track, others, w, h };
+  }
+
   const bounce = findBounce(pts);
   let release: number | null = null;
   let releaseNote: string | null = null;
@@ -80,5 +108,6 @@ export function analyzeFrames(
     release,
     releaseNote,
     fps,
+    training,
   };
 }

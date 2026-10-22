@@ -300,7 +300,7 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
           fps,
         );
         if (frames.length < 6) throw new Error("Too few frames in this clip to track the ball.");
-        const result = analyzeFrames(frames, times, clip.contact);
+        const result = analyzeFrames(frames, times, clip.contact, { collect: true });
         setAnalyses((a) => ({ ...a, [id]: { status: "done", progress: 1, result, error: null } }));
         setMarks((all) => {
           const cur = all[id] ?? emptyMarks();

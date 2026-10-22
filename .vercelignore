@@ -1,6 +1,6 @@
 # The old Streamlit app is kept for reference only; it is not deployed.
-legacy/
-.venv/
-highlights/
-videos/
+/legacy/
+/.venv/
+/highlights/
+/videos/
 *.mp4

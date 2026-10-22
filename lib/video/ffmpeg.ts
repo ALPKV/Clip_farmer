@@ -195,10 +195,18 @@ export function estimateBytes(fileSize: number, duration: number, clipSeconds: n
   return precise ? Math.min(rate, 2.5e6) * clipSeconds : rate * (clipSeconds + clipCount);
 }
 
-/** How big one highlights video can safely be on this device. Phones and tablets get far less memory. */
+/**
+ * How big one part of a highlights video can be on this device. Making a part briefly needs about
+ * five times its size (the cut pieces, the engine's copy, the copy handed back and the saved file),
+ * and a browser tab gets roughly 1–2 GB on a computer and far less on a phone.
+ */
 export function reelBudget(): number {
   const touch = typeof window !== "undefined" && navigator.maxTouchPoints > 0 && matchMedia("(pointer: coarse)").matches;
-  return touch ? 300e6 : 900e6;
+  return touch ? 100e6 : 250e6;
+}
+
+export function isOutOfMemory(err: unknown): boolean {
+  return err instanceof Error && /ran out of memory/.test(err.message);
 }
 
 export function download(blob: Blob, filename: string) {
@@ -227,13 +235,14 @@ export function isApple(): boolean {
   return typeof navigator !== "undefined" && /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent);
 }
 
-/** Opens the share sheet with the video. Cancelling it is not an error. */
-export async function saveToPhotos(blob: Blob, filename: string): Promise<void> {
+/** Opens the share sheet with the video. False if it was cancelled, which is not an error. */
+export async function saveToPhotos(blob: Blob, filename: string): Promise<boolean> {
   const file = new File([blob], filename, { type: "video/mp4" });
   try {
     await navigator.share({ files: [file] });
+    return true;
   } catch (err) {
-    if ((err as Error).name === "AbortError") return;
+    if ((err as Error).name === "AbortError") return false;
     throw new Error("Couldn't open the share sheet. Use Download instead.");
   }
 }

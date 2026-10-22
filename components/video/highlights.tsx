@@ -9,6 +9,7 @@ import {
   exportClip,
   exportReel,
   isApple,
+  isOutOfMemory,
   reelBudget,
   saveToPhotos,
 } from "@/lib/video/ffmpeg";
@@ -17,7 +18,8 @@ import { Stage } from "./stage";
 import { FileBar, VideoDrop, clock } from "./video-drop";
 import { PRESETS, useVideo, type Clip, type PresetKey } from "./video-context";
 
-type Reel = { url: string; blob: Blob; clips: number; seconds: number; part: number };
+/** One part of the highlights: clips [from, to) of the ticked clips. */
+type Reel = { url: string; blob: Blob; clips: number; seconds: number; part: number; from: number; to: number };
 type Ready = { blob: Blob; name: string; label: string };
 
 /** Splits the clips, in order, into groups that each make a video small enough for this device. */
@@ -45,6 +47,9 @@ export function Highlights() {
   const [skip, setSkip] = useState<Set<string>>(new Set());
   const [precise, setPrecise] = useState(false);
   const [reel, setReel] = useState<Reel | null>(null);
+  // Shrinks the parts after a part runs out of memory anyway, for the rest of this video.
+  const [scale, setScale] = useState(1);
+  const [savedPart, setSavedPart] = useState<number | null>(null);
   // A single clip made on a phone, waiting for a tap to save it (the share sheet needs a fresh tap).
   const [ready, setReady] = useState<Ready | null>(null);
   const [shareable] = useState(canSaveToPhotos);
@@ -63,6 +68,7 @@ export function Highlights() {
     setReady(null);
     setSkip(new Set());
     setError(null);
+    setScale(1);
   }
 
   if (!v.file) return <VideoDrop />;
@@ -75,9 +81,13 @@ export function Highlights() {
   const duration = v.meta?.duration ?? 0;
   const bytes = (c: Clip) => (duration ? estimateBytes(fileSize, duration, c.end - c.start, 1, precise) : 0);
   const estimate = included.reduce((a, c) => a + bytes(c), 0);
-  const groups = splitForMemory(included, bytes, reelBudget());
+  const budget = reelBudget();
+  const groups = splitForMemory(included, bytes, budget * scale);
   const seconds = (g: Clip[]) => g.reduce((a, c) => a + (c.end - c.start), 0);
-  const reelName = (part: number) => (groups.length > 1 ? `${base}_highlights_part${part + 1}.mp4` : `${base}_highlights.mp4`);
+  // Parts left after the current one, at the current part size.
+  const remaining = reel ? splitForMemory(included.slice(reel.to), bytes, budget * scale).length : 0;
+  const totalParts = reel ? reel.part + 1 + remaining : groups.length;
+  const reelName = (part: number) => (totalParts > 1 ? `${base}_highlights_part${part + 1}.mp4` : `${base}_highlights.mp4`);
 
   function toggle(id: string) {
     setSkip((s) => {
@@ -88,20 +98,70 @@ export function Highlights() {
     });
   }
 
-  function buildReel(part = 0) {
-    const group = groups[part];
-    if (!group) return;
-    // Let go of the previous video first so two are never in memory at once.
+  /**
+   * Makes the part that starts at ticked clip `from`. If the device still runs out of memory, the
+   * part is made again with half as many clips, down to a single clip, without asking.
+   */
+  function buildReel(from = 0, part = 0) {
+    if (from >= included.length) return;
+    // Let go of the previous part first so two are never in memory at once.
     setReel(null);
     void run("reel", async () => {
-      setReelProgress(0);
-      const blob = await exportReel(v.file!, group, setReelProgress, { precise });
-      setReel({ url: URL.createObjectURL(blob), blob, clips: group.length, seconds: seconds(group), part });
+      let s = scale;
+      for (;;) {
+        const group = splitForMemory(included.slice(from), bytes, budget * s)[0];
+        setReelProgress(0);
+        try {
+          const blob = await exportReel(v.file!, group, setReelProgress, { precise });
+          setReel({
+            url: URL.createObjectURL(blob),
+            blob,
+            clips: group.length,
+            seconds: seconds(group),
+            part,
+            from,
+            to: from + group.length,
+          });
+          return;
+        } catch (err) {
+          if (!isOutOfMemory(err) || group.length === 1) throw err;
+          s /= 2;
+          setScale(s);
+        }
+      }
     });
   }
 
+  function nextPart(r: Reel) {
+    if (r.to < included.length) buildReel(r.to, r.part + 1);
+  }
+
+  /** Saving a part starts the next one, so a long session needs one tap per part. */
+  function savePart(r: Reel, how: "photos" | "download") {
+    const name = reelName(r.part);
+    if (how === "download") {
+      download(r.blob, name);
+      setSavedPart(r.part);
+      // Give the browser a moment to start the download before the next part takes the memory.
+      setTimeout(() => nextPart(r), 1500);
+      return;
+    }
+    void (async () => {
+      let shared = false;
+      await run("share", async () => {
+        shared = await saveToPhotos(r.blob, name);
+      });
+      if (shared) {
+        setSavedPart(r.part);
+        nextPart(r);
+      }
+    })();
+  }
+
   function save(blob: Blob, name: string) {
-    void run("share", () => saveToPhotos(blob, name));
+    void run("share", async () => {
+      await saveToPhotos(blob, name);
+    });
   }
 
   function play(c: Clip) {
@@ -144,24 +204,27 @@ export function Highlights() {
                   <video src={reel.url} controls playsInline className="w-full bg-navy-950" />
                   <div className="space-y-3">
                     <p className="display text-2xl font-extrabold text-navy">
-                      {groups.length > 1 ? `Part ${reel.part + 1} of ${groups.length} is ready` : "Your highlights are ready"}
+                      {totalParts > 1 ? `Part ${reel.part + 1} of ${totalParts} is ready` : "Your highlights are ready"}
                     </p>
                     <p className="text-sm text-slate">
-                      {reel.clips} clips · about {clock(reel.seconds)} · {(reel.blob.size / 1_048_576).toFixed(1)} MB. Watch it
-                      here, then save it.
-                      {groups.length > 1 && reel.part + 1 < groups.length ? " Save this part before making the next one." : ""}
+                      {reel.clips} clips · about {clock(reel.seconds)} · {(reel.blob.size / 1_048_576).toFixed(1)} MB.
+                      {reel.to < included.length
+                        ? " Save it and the next part starts straight away."
+                        : totalParts > 1
+                          ? " That's the last part."
+                          : " Watch it here, then save it."}
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {shareable ? (
-                        <Button tone="gold" disabled={busy === "share"} onClick={() => save(reel.blob, reelName(reel.part))}>
+                        <Button tone="gold" disabled={busy === "share"} onClick={() => savePart(reel, "photos")}>
                           {photosLabel}
                         </Button>
                       ) : null}
-                      <Button tone={shareable ? "ghost" : "gold"} onClick={() => download(reel.blob, reelName(reel.part))}>
+                      <Button tone={shareable ? "ghost" : "gold"} onClick={() => savePart(reel, "download")}>
                         Download video
                       </Button>
-                      {groups.length > 1 && reel.part + 1 < groups.length ? (
-                        <Button tone="ghost" disabled={busy != null} onClick={() => buildReel(reel.part + 1)}>
+                      {reel.to < included.length ? (
+                        <Button tone={savedPart === reel.part ? "gold" : "ghost"} disabled={busy != null} onClick={() => nextPart(reel)}>
                           Make part {reel.part + 2}
                         </Button>
                       ) : null}
@@ -180,8 +243,8 @@ export function Highlights() {
                     </p>
                     {groups.length > 1 ? (
                       <p className="mt-2 border-l-4 border-gold bg-gold/10 px-3 py-2 text-sm text-ink">
-                        At about {Math.round(estimate / 1_048_576)} MB this is too big to make in one go on this device, so it
-                        comes in {groups.length} parts. Make and save each part in turn.
+                        At about {Math.round(estimate / 1_048_576)} MB this comes in {groups.length} parts, so your device never
+                        runs out of memory. Save each part and the next one starts by itself.
                       </p>
                     ) : null}
                     <label className="mt-2 flex items-start gap-2 text-sm">
@@ -192,7 +255,7 @@ export function Highlights() {
                       </span>
                     </label>
                   </div>
-                  <Button tone="gold" disabled={busy != null || included.length === 0} onClick={() => buildReel(0)}>
+                  <Button tone="gold" disabled={busy != null || included.length === 0} onClick={() => buildReel(0, 0)}>
                     {busy === "reel"
                       ? `Building ${Math.round(reelProgress * 100)}%`
                       : groups.length > 1

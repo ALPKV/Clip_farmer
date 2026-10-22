@@ -22,11 +22,13 @@ export type Impact = {
   /** log10 of high-band over low-band energy: above 0 is a bright crack, well below is a dull thud. */
   hiLo: number;
   /**
-   * How much more voiced the 150 ms after the sound is than the moment before (0–1). A vowel repeats
-   * 80–400 times a second, so speech scores high; a bat crack dies away into silence or net noise. A
-   * steady hum (a bowling machine) is voiced before and after too, so it doesn't count.
+   * How voiced the 150 ms after the sound is (0–1). A vowel repeats 80–400 times a second, so speech
+   * scores high; a bat crack dies away into silence or net noise. Compared with `voiceBefore`, so a
+   * steady hum (a bowling machine) doesn't count.
    */
   voice: number;
+  /** The same measure for the moment just before the sound. */
+  voiceBefore: number;
 };
 
 /** Normalised autocorrelation peak over pitch periods of 80–400 Hz, on 8 kHz samples. */
@@ -52,8 +54,14 @@ function voicing(pcm: Int16Array | Float32Array, sampleRate: number, from: numbe
   return best;
 }
 
-/** Talking, not a cricket impact. */
-export const isSpeech = (e: Impact) => e.voice > 0.25;
+/**
+ * Talking, not a cricket impact: strongly voiced afterwards, and much more than just before. Set
+ * between the talking found in the labelled sessions (0.79, +0.41) and the most voiced real
+ * delivery (0.65, +0.22).
+ */
+export const isSpeech = (e: Impact) => e.voice > SPEECH_VOICE && e.voice - e.voiceBefore > SPEECH_RISE;
+export const SPEECH_VOICE = 0.6;
+export const SPEECH_RISE = 0.3;
 
 export type SoundDelivery = {
   /** Time of the first sharp sound of the group: the bat (or stumps) contact. */
@@ -215,7 +223,8 @@ export async function findImpacts(
     const voicedBefore = voicing(pcm, sampleRate, t - 0.2, t - 0.05);
     out.push({
       t,
-      voice: Math.max(0, voicedAfter - Math.max(voicedBefore, 0.5)),
+      voice: voicedAfter,
+      voiceBefore: voicedBefore,
       z: z[f],
       riseDb: 20 * Math.log10(peak / before),
       levelDb: 20 * Math.log10(peak + 1e-9),

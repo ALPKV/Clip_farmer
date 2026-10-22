@@ -80,6 +80,9 @@ export async function currentUser(): Promise<User | null> {
  * Counts an attempt for `key` and returns false once it exceeds `limit` within `windowMin` minutes.
  */
 export async function allowAttempt(key: string, limit: number, windowMin: number): Promise<boolean> {
+  // Housekeeping: nothing about old attempts or ended sessions is kept longer than needed.
+  await query("delete from login_attempts where window_start < now() - interval '1 day'");
+  await query("delete from auth_sessions where expires_at < now()");
   const row = await queryOne<{ count: number }>(
     `insert into login_attempts (key, count, window_start) values ($1, 1, now())
      on conflict (key) do update set

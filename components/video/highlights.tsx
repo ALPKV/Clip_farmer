@@ -2,13 +2,29 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { download, exportClip, exportReel } from "@/lib/video/ffmpeg";
+import { download, estimateBytes, exportClip, exportReel, reelBudget } from "@/lib/video/ffmpeg";
 import { Button, Empty, Meter, Panel, Stat, Tag } from "../ui";
 import { Stage } from "./stage";
 import { FileBar, VideoDrop, clock } from "./video-drop";
 import { PRESETS, useVideo, type Clip, type PresetKey } from "./video-context";
 
-type Reel = { url: string; blob: Blob; clips: number; seconds: number };
+type Reel = { url: string; blob: Blob; clips: number; seconds: number; part: number };
+
+/** Splits the clips, in order, into groups that each make a video small enough for this device. */
+function splitForMemory(clips: Clip[], bytes: (c: Clip) => number, budget: number): Clip[][] {
+  const groups: Clip[][] = [];
+  let size = Infinity;
+  for (const c of clips) {
+    const b = bytes(c);
+    if (size + b > budget) {
+      groups.push([]);
+      size = 0;
+    }
+    groups[groups.length - 1].push(c);
+    size += b;
+  }
+  return groups;
+}
 
 export function Highlights() {
   const v = useVideo();
@@ -25,12 +41,27 @@ export function Highlights() {
     if (reel) URL.revokeObjectURL(reel.url);
   }, [reel]);
 
+  // A new or removed video starts over: nothing made from the old one is kept.
+  const [forFile, setForFile] = useState(v.file);
+  if (forFile !== v.file) {
+    setForFile(v.file);
+    setReel(null);
+    setSkip(new Set());
+    setError(null);
+  }
+
   if (!v.file) return <VideoDrop />;
 
   const selected = v.clips.find((c) => c.id === v.selectedId) ?? null;
   const included = v.clips.filter((c) => !skip.has(c.id));
   const total = included.reduce((a, c) => a + (c.end - c.start), 0);
   const base = v.file.name.replace(/\.[^.]+$/, "");
+  const fileSize = v.file.size;
+  const duration = v.meta?.duration ?? 0;
+  const bytes = (c: Clip) => (duration ? estimateBytes(fileSize, duration, c.end - c.start, 1, precise) : 0);
+  const estimate = included.reduce((a, c) => a + bytes(c), 0);
+  const groups = splitForMemory(included, bytes, reelBudget());
+  const seconds = (g: Clip[]) => g.reduce((a, c) => a + (c.end - c.start), 0);
 
   function toggle(id: string) {
     setSkip((s) => {
@@ -41,11 +72,15 @@ export function Highlights() {
     });
   }
 
-  function buildReel() {
+  function buildReel(part = 0) {
+    const group = groups[part];
+    if (!group) return;
+    // Let go of the previous video first so two are never in memory at once.
+    setReel(null);
     void run("reel", async () => {
       setReelProgress(0);
-      const blob = await exportReel(v.file!, included, setReelProgress, { precise });
-      setReel({ url: URL.createObjectURL(blob), blob, clips: included.length, seconds: total });
+      const blob = await exportReel(v.file!, group, setReelProgress, { precise });
+      setReel({ url: URL.createObjectURL(blob), blob, clips: group.length, seconds: seconds(group), part });
     });
   }
 
@@ -84,17 +119,30 @@ export function Highlights() {
                 <div className="grid gap-4 md:grid-cols-[minmax(0,240px)_1fr]">
                   <video src={reel.url} controls playsInline className="w-full bg-navy-950" />
                   <div className="space-y-3">
-                    <p className="display text-2xl font-extrabold text-navy">Your highlights are ready</p>
+                    <p className="display text-2xl font-extrabold text-navy">
+                      {groups.length > 1 ? `Part ${reel.part + 1} of ${groups.length} is ready` : "Your highlights are ready"}
+                    </p>
                     <p className="text-sm text-slate">
                       {reel.clips} clips · about {clock(reel.seconds)} · {(reel.blob.size / 1_048_576).toFixed(1)} MB. Watch it
                       here, then save it.
+                      {groups.length > 1 && reel.part + 1 < groups.length ? " Save this part before making the next one." : ""}
                     </p>
                     <div className="flex flex-wrap gap-2">
-                      <Button tone="gold" onClick={() => download(reel.blob, `${base}_highlights.mp4`)}>
+                      <Button
+                        tone="gold"
+                        onClick={() =>
+                          download(reel.blob, groups.length > 1 ? `${base}_highlights_part${reel.part + 1}.mp4` : `${base}_highlights.mp4`)
+                        }
+                      >
                         Download video
                       </Button>
+                      {groups.length > 1 && reel.part + 1 < groups.length ? (
+                        <Button tone="ghost" disabled={busy != null} onClick={() => buildReel(reel.part + 1)}>
+                          Make part {reel.part + 2}
+                        </Button>
+                      ) : null}
                       <Button tone="ghost" onClick={() => setReel(null)}>
-                        Make another
+                        Start over
                       </Button>
                     </div>
                   </div>
@@ -106,16 +154,26 @@ export function Highlights() {
                       Joins the <b className="text-ink">{included.length}</b> ticked clips below, in order, into one video (
                       {clock(total)}). Untick any you don&apos;t want.
                     </p>
+                    {groups.length > 1 ? (
+                      <p className="mt-2 border-l-4 border-gold bg-gold/10 px-3 py-2 text-sm text-ink">
+                        At about {Math.round(estimate / 1_048_576)} MB this is too big to make in one go on this device, so it
+                        comes in {groups.length} parts. Make and save each part in turn.
+                      </p>
+                    ) : null}
                     <label className="mt-2 flex items-start gap-2 text-sm">
                       <input type="checkbox" className="mt-1" checked={precise} onChange={(e) => setPrecise(e.target.checked)} />
                       <span>
-                        <b>Exact cuts</b>: every clip starts on the exact frame. Slower (re-encodes, 1080p max). Without it,
-                        clips can start up to a second early, but it takes seconds.
+                        <b>Exact cuts</b>: every clip starts on the exact frame, and the file is smaller. Slower (re-encodes,
+                        1080p max). Without it, clips can start up to a second early, but it takes seconds.
                       </span>
                     </label>
                   </div>
-                  <Button tone="gold" disabled={busy != null || included.length === 0} onClick={buildReel}>
-                    {busy === "reel" ? `Building ${Math.round(reelProgress * 100)}%` : "Create highlights video"}
+                  <Button tone="gold" disabled={busy != null || included.length === 0} onClick={() => buildReel(0)}>
+                    {busy === "reel"
+                      ? `Building ${Math.round(reelProgress * 100)}%`
+                      : groups.length > 1
+                        ? `Create part 1 of ${groups.length}`
+                        : "Create highlights video"}
                   </Button>
                 </div>
               )}
@@ -265,6 +323,10 @@ export function Highlights() {
             <p className="text-sm text-slate">
               <b className="text-ink">Save</b> on a clip downloads just that clip. <b className="text-ink">Create highlights
               video</b> joins the ticked clips into one. Everything is made on this device; nothing is uploaded.
+            </p>
+            <p className="mt-3 text-sm text-slate">
+              Your video stays only in this tab&apos;s memory. It and anything made from it are wiped when you press
+              Change video, sign out or close the tab.
             </p>
             <p className="mt-3 text-xs text-mute">The first time, the video engine (about 30 MB) downloads once.</p>
           </Panel>

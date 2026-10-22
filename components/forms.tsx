@@ -200,3 +200,56 @@ export function ProfileForm({ user }: { user: User }) {
     </form>
   );
 }
+
+export function DeleteAccountForm() {
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function submit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/profile", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: new FormData(e.currentTarget).get("password") }),
+      });
+      if (!res.ok) {
+        setError((await res.json().catch(() => ({}))).error ?? `Request failed (${res.status}).`);
+        return;
+      }
+      // A full page load, so nothing from the deleted account stays in memory.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- a full reload is the point here
+      window.location.assign("/");
+    } catch {
+      setError("Could not reach the server. Check your connection.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (!open) {
+    return (
+      <Button tone="danger" onClick={() => setOpen(true)}>
+        Delete account
+      </Button>
+    );
+  }
+  return (
+    <form onSubmit={submit} className="space-y-3">
+      <p className="text-sm text-ink">
+        This erases your account and every session, match, goal, log and saved delivery. It cannot be undone. Enter your
+        password to confirm.
+      </p>
+      <label className="block max-w-xs">
+        <span className="label">Password</span>
+        <input className="field" type="password" name="password" autoComplete="current-password" required />
+      </label>
+      <FormError error={error} />
+      <div className="flex gap-2">
+        <Button type="submit" tone="danger" disabled={busy}>{busy ? "Deleting…" : "Delete everything"}</Button>
+        <Button type="button" tone="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+      </div>
+    </form>
+  );
+}

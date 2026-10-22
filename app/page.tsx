@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Brand } from "@/components/brand";
+import { LegalFooter } from "@/components/legal-footer";
 import { ButtonLink } from "@/components/ui";
 import { currentUser } from "@/lib/auth";
 
@@ -90,12 +91,7 @@ export default async function Home() {
         </div>
       </section>
 
-      <footer className="bg-navy-950 text-white/60">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-6 text-xs sm:px-6">
-          <Brand />
-          <span>Built for cricketers who practise with a purpose.</span>
-        </div>
-      </footer>
+      <LegalFooter />
     </div>
   );
 }

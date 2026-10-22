@@ -63,6 +63,12 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
       {error ? (
         <p role="alert" className="border-l-4 border-risk bg-risk/5 px-3 py-2 text-sm text-risk">{error}</p>
       ) : null}
+      {mode === "signup" ? (
+        <p className="text-xs text-slate">
+          By creating an account you agree to the <Link className="font-semibold text-navy underline" href="/terms">Terms</Link>{" "}
+          and <Link className="font-semibold text-navy underline" href="/privacy">Privacy Policy</Link>.
+        </p>
+      ) : null}
       <Button type="submit" tone="gold" disabled={busy} className="w-full">
         {busy ? "Please wait…" : mode === "signup" ? "Create account" : "Sign in"}
       </Button>

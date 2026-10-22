@@ -4,12 +4,13 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { analyzeFrames, type BallAnalysis } from "@/lib/tracking/analyze";
 import { detectHits, type Hit } from "@/lib/tracking/hits";
 import { DEFAULT_SETUP, lengthM, lineCm, speedKmh, type Setup } from "@/lib/tracking/metrics";
-import { extractAudio } from "@/lib/video/ffmpeg";
+import { extractAudio, releaseEngine } from "@/lib/video/ffmpeg";
 import { captureFrames } from "@/lib/video/frames";
 
 /**
  * The loaded video and everything derived from it, shared by the Highlights and Ball Tracking
- * tabs so switching tabs keeps your work. Nothing here leaves the browser.
+ * tabs so switching tabs keeps your work. Nothing here leaves the browser, and all of it is dropped
+ * (and the video engine shut down) when the video is removed, you sign out or the tab closes.
  */
 
 export const PRESETS = {
@@ -111,6 +112,7 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
   const loadToken = useRef(0);
 
   useEffect(() => setSetupState(loadSetup()), []);
+  useEffect(() => releaseEngine, []);
 
   const setSetup = useCallback((s: TrackingSetup) => {
     setSetupState(s);
@@ -134,6 +136,7 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
     setAnalyses({});
     setMarks({});
     select(null);
+    releaseEngine();
   }, []);
 
   const loadFile = useCallback(

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Brand } from "@/components/brand";
 import { currentUser } from "@/lib/auth";
@@ -19,7 +20,11 @@ export default async function AuthLayout({ children }: { children: React.ReactNo
             clips with ball tracking. All in one place.
           </p>
         </div>
-        <p className="relative text-xs text-white/50">Videos are analysed in your browser and never uploaded.</p>
+        <p className="relative text-xs text-white/50">
+          Videos are analysed in your browser and never uploaded.{" "}
+          <Link href="/privacy" className="underline hover:text-white">Privacy</Link> ·{" "}
+          <Link href="/terms" className="underline hover:text-white">Terms</Link>
+        </p>
       </aside>
       <main className="flex items-center justify-center bg-paper px-4 py-12">
         <div className="w-full max-w-sm">

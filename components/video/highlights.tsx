@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   canSaveToPhotos,
   download,
@@ -50,6 +50,9 @@ export function Highlights() {
   // Shrinks the parts after a part runs out of memory anyway, for the rest of this video.
   const [scale, setScale] = useState(1);
   const [savedPart, setSavedPart] = useState<number | null>(null);
+  // Which part is being made, and when it started, for the progress line.
+  const [building, setBuilding] = useState<{ part: number; of: number; clips: number } | null>(null);
+  const startedAt = useRef(0);
   // A single clip made on a phone, waiting for a tap to save it (the share sheet needs a fresh tap).
   const [ready, setReady] = useState<Ready | null>(null);
   const [shareable] = useState(canSaveToPhotos);
@@ -78,8 +81,10 @@ export function Highlights() {
   const total = included.reduce((a, c) => a + (c.end - c.start), 0);
   const base = v.file.name.replace(/\.[^.]+$/, "");
   const fileSize = v.file.size;
-  const duration = v.meta?.duration ?? 0;
-  const bytes = (c: Clip) => (duration ? estimateBytes(fileSize, duration, c.end - c.start, 1, precise) : 0);
+  // If the browser can't tell the video's length, the last clip is close to the end of the session.
+  const lastEnd = v.clips.reduce((a, c) => Math.max(a, c.end), 0);
+  const duration = v.meta?.duration && Number.isFinite(v.meta.duration) ? v.meta.duration : lastEnd + 5;
+  const bytes = (c: Clip) => estimateBytes(fileSize, duration, c.end - c.start, 1, precise);
   const estimate = included.reduce((a, c) => a + bytes(c), 0);
   const budget = reelBudget();
   const groups = splitForMemory(included, bytes, budget * scale);
@@ -110,6 +115,8 @@ export function Highlights() {
       let s = scale;
       for (;;) {
         const group = splitForMemory(included.slice(from), bytes, budget * s)[0];
+        setBuilding({ part, of: part + splitForMemory(included.slice(from), bytes, budget * s).length, clips: group.length });
+        startedAt.current = performance.now();
         setReelProgress(0);
         try {
           const blob = await exportReel(v.file!, group, setReelProgress, { precise });
@@ -129,7 +136,7 @@ export function Highlights() {
           setScale(s);
         }
       }
-    });
+    }).finally(() => setBuilding(null));
   }
 
   function nextPart(r: Reel) {
@@ -167,6 +174,13 @@ export function Highlights() {
   function play(c: Clip) {
     v.select(c.id);
     v.seek(c.start, true);
+  }
+
+  function timeLeft(): string {
+    const elapsed = (performance.now() - startedAt.current) / 1000;
+    if (reelProgress < 0.08 || elapsed < 4) return "working out time left";
+    const left = (elapsed * (1 - reelProgress)) / reelProgress;
+    return left < 60 ? "under a minute left" : `about ${Math.round(left / 60)} min left`;
   }
 
   async function run(label: string, job: () => Promise<void>) {
@@ -241,10 +255,21 @@ export function Highlights() {
                       Joins the <b className="text-ink">{included.length}</b> ticked clips below, in order, into one video (
                       {clock(total)}). Untick any you don&apos;t want.
                     </p>
-                    {groups.length > 1 ? (
-                      <p className="mt-2 border-l-4 border-gold bg-gold/10 px-3 py-2 text-sm text-ink">
-                        At about {Math.round(estimate / 1_048_576)} MB this comes in {groups.length} parts, so your device never
-                        runs out of memory. Save each part and the next one starts by itself.
+                    <p className="mt-2 border-l-4 border-gold bg-gold/10 px-3 py-2 text-sm text-ink">
+                      {groups.length > 1 ? (
+                        <>
+                          At about {Math.round(estimate / 1_048_576)} MB this comes in <b>{groups.length} parts</b> of up to{" "}
+                          {Math.round((budget * scale) / 1e6)} MB, so your device never runs out of memory. Save each part and
+                          the next one starts by itself.
+                        </>
+                      ) : (
+                        <>About {Math.round(estimate / 1_048_576)} MB: small enough to make in one go.</>
+                      )}
+                    </p>
+                    {precise && included.length > 20 ? (
+                      <p className="mt-2 text-sm text-warn">
+                        Exact cuts re-encode every clip on this device, which can take several minutes for {included.length} clips.
+                        Untick it for a much faster video.
                       </p>
                     ) : null}
                     <label className="mt-2 flex items-start gap-2 text-sm">
@@ -257,7 +282,9 @@ export function Highlights() {
                   </div>
                   <Button tone="gold" disabled={busy != null || included.length === 0} onClick={() => buildReel(0, 0)}>
                     {busy === "reel"
-                      ? `Building ${Math.round(reelProgress * 100)}%`
+                      ? building && building.of > 1
+                        ? `Part ${building.part + 1} of ${building.of} · ${Math.round(reelProgress * 100)}%`
+                        : `Building ${Math.round(reelProgress * 100)}%`
                       : groups.length > 1
                         ? `Create part 1 of ${groups.length}`
                         : "Create highlights video"}
@@ -265,7 +292,14 @@ export function Highlights() {
                 </div>
               )}
               {busy === "reel" ? (
-                <div className="mt-3">
+                <div className="mt-3 space-y-1.5">
+                  <p className="text-sm text-slate">
+                    {building && building.of > 1 ? `Making part ${building.part + 1} of ${building.of}` : "Making your highlights video"}
+                    {" · "}
+                    {building && reelProgress >= building.clips / (building.clips + 1) - 1e-6
+                      ? "joining the clips"
+                      : `cutting clip ${Math.min(building?.clips ?? 1, Math.floor(reelProgress * ((building?.clips ?? 0) + 1)) + 1)} of ${building?.clips ?? "?"}`} · {timeLeft()}. Keep this tab open.
+                  </p>
                   <Meter value={reelProgress} max={1} tone="gold" />
                 </div>
               ) : null}

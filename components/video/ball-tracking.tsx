@@ -64,7 +64,7 @@ export function BallTracking({ deliveries, today, shareTraining }: { deliveries:
   return (
     <div className="space-y-5">
       <FileBar />
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-5">
           <div className="flex flex-wrap items-end gap-3 border border-line bg-white p-3">
             <label className="min-w-[220px] flex-1">

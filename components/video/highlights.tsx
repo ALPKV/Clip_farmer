@@ -10,6 +10,7 @@ import {
   exportReel,
   isApple,
   isOutOfMemory,
+  isTouchDevice,
   MAX_PARTS,
   reelBudget,
   saveToPhotos,
@@ -51,6 +52,21 @@ export function Highlights() {
   // Shrinks the parts after a part runs out of memory anyway, for the rest of this video.
   const [scale, setScale] = useState(1);
   const [savedPart, setSavedPart] = useState<number | null>(null);
+  const [touch] = useState(isTouchDevice);
+  const [bigParts, setBigParts] = useState(() => {
+    try {
+      return localStorage.getItem("flipper.bigParts") === "1";
+    } catch {
+      return false;
+    }
+  });
+  function chooseBigParts(on: boolean) {
+    setBigParts(on);
+    setScale(1);
+    try {
+      localStorage.setItem("flipper.bigParts", on ? "1" : "0");
+    } catch {}
+  }
   // Which part is being made, and when it started, for the progress line.
   const [building, setBuilding] = useState<{ part: number; of: number; clips: number } | null>(null);
   const startedAt = useRef(0);
@@ -87,7 +103,7 @@ export function Highlights() {
   const duration = v.meta?.duration && Number.isFinite(v.meta.duration) ? v.meta.duration : lastEnd + 5;
   const bytes = (c: Clip) => estimateBytes(fileSize, duration, c.end - c.start, 1, precise);
   const estimate = included.reduce((a, c) => a + bytes(c), 0);
-  const budget = reelBudget(estimate);
+  const budget = reelBudget(estimate, bigParts);
   const groups = splitForMemory(included, bytes, budget * scale);
   const seconds = (g: Clip[]) => g.reduce((a, c) => a + (c.end - c.start), 0);
   // Parts left after the current one, at the current part size.
@@ -209,7 +225,7 @@ export function Highlights() {
         />
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="space-y-5">
           <Stage clip={selected} />
           {v.clips.length > 0 ? (
@@ -260,8 +276,8 @@ export function Highlights() {
                       {groups.length > MAX_PARTS ? (
                         <>
                           At about {Math.round(estimate / 1_048_576)} MB this would take <b>{groups.length} parts</b> on this
-                          device, more than the {MAX_PARTS} it can do. Untick clips you don&apos;t need (or pick{" "}
-                          <b>Big hits</b>), or make it on a computer, where parts can be bigger.
+                          device, more than the {MAX_PARTS} it can do. {touch && !bigParts ? "Turn on Bigger parts below, untick" : "Untick"}{" "}
+                          clips you don&apos;t need (or pick <b>Big hits</b>), or make it on a computer.
                         </>
                       ) : groups.length > 1 ? (
                         <>
@@ -273,6 +289,15 @@ export function Highlights() {
                         <>About {Math.round(estimate / 1_048_576)} MB: small enough to make in one go.</>
                       )}
                     </p>
+                    {touch ? (
+                      <label className="mt-2 flex items-start gap-2 text-sm">
+                        <input type="checkbox" className="mt-1" checked={bigParts} onChange={(e) => chooseBigParts(e.target.checked)} />
+                        <span>
+                          <b>Bigger parts</b>: up to 750 MB each, like on a computer, so fewer files. Works on most recent
+                          phones. If the page reloads while making a part, turn this off.
+                        </span>
+                      </label>
+                    ) : null}
                     {precise && included.length > 20 ? (
                       <p className="mt-2 text-sm text-warn">
                         Exact cuts re-encode every clip on this device, which can take several minutes for {included.length} clips.

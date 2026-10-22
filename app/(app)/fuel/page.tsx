@@ -44,7 +44,7 @@ export default async function FuelPage() {
             note={target && todayTotal < target.min ? `${target.min - Math.round(todayTotal)} g to go` : undefined}
           />
         </div>
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
           <Panel title="Log food">
             <CarbForm today={today} />
           </Panel>

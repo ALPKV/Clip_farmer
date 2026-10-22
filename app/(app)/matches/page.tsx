@@ -39,7 +39,7 @@ export default async function MatchesPage() {
           <Stat label="Economy" value={fmt.num(economy(conceded, ballsBowled), 2)} note="Runs per over" />
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <MatchForm today={today} />
           <div className="space-y-6">
             <Panel title="Runs per innings">

@@ -204,10 +204,15 @@ export const MAX_PARTS = 10;
  * parts start small; for a long session they grow, up to a limit, to stay within MAX_PARTS. A part
  * that still runs out of memory is remade smaller (see Highlights).
  */
-export function reelBudget(estimate: number): number {
-  const touch = typeof window !== "undefined" && navigator.maxTouchPoints > 0 && matchMedia("(pointer: coarse)").matches;
-  const [small, ceiling] = touch ? [100e6, 300e6] : [250e6, 750e6];
+export function reelBudget(estimate: number, bigParts = false): number {
+  // "Bigger parts" lets a phone use a computer's part sizes: fewer files, but an older phone may
+  // close the tab instead of reporting that it ran out of memory.
+  const [small, ceiling] = isTouchDevice() && !bigParts ? [100e6, 300e6] : [250e6, 750e6];
   return Math.min(ceiling, Math.max(small, (estimate / MAX_PARTS) * 1.1));
+}
+
+export function isTouchDevice(): boolean {
+  return typeof window !== "undefined" && navigator.maxTouchPoints > 0 && matchMedia("(pointer: coarse)").matches;
 }
 
 export function isOutOfMemory(err: unknown): boolean {

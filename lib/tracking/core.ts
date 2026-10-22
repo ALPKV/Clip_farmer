@@ -10,9 +10,21 @@
 
 export type Gray = { data: Uint8Array; w: number; h: number };
 
-export type Candidate = { x: number; y: number; area: number; bw: number; bh: number; crowd?: number };
+export type Candidate = {
+  x: number;
+  y: number;
+  area: number;
+  bw: number;
+  bh: number;
+  crowd?: number;
+  /** Ball-likeness from the trained model, as log-odds (0 = undecided). */
+  score?: number;
+};
 
-export type TrackPoint = { i: number; t: number; x: number; y: number; r: number; crowd: number };
+export type TrackPoint = { i: number; t: number; x: number; y: number; r: number; crowd: number; score: number };
+
+/** Scores a blob as ball-like (log-odds); see model.ts. */
+export type Scorer = (prev: Gray, cur: Gray, next: Gray, c: Candidate) => number;
 
 export type DetectOptions = {
   /** Minimum brightness change (0–255) for a pixel to count as moving. */
@@ -20,6 +32,9 @@ export type DetectOptions = {
   minArea: number;
   maxArea: number;
   maxCandidates: number;
+  /** Optional trained ball / not-ball model and how much its opinion counts when ranking blobs. */
+  scorer?: Scorer;
+  scoreWeight?: number;
 };
 
 export function defaultDetectOptions(w: number, h: number): DetectOptions {
@@ -113,11 +128,14 @@ export function detect(prev: Gray, cur: Gray, next: Gray, opt: DetectOptions): C
     c.crowd = 0;
     for (const d of out) if (d !== c && (d.x - c.x) ** 2 + (d.y - c.y) ** 2 < crowdR2) c.crowd++;
   }
-  out.sort((p, q) => rank(q) - rank(p));
+  if (opt.scorer) for (const c of out) c.score = opt.scorer(prev, cur, next, c);
+  const sw = opt.scoreWeight ?? 0.05;
+  out.sort((p, q) => rank(q, sw) - rank(p, sw));
   return out.slice(0, opt.maxCandidates);
 }
 
-const rank = (c: Candidate) => compactness(c) - 0.15 * (c.crowd ?? 0);
+const clampScore = (s: number | undefined) => Math.max(-6, Math.min(6, s ?? 0));
+const rank = (c: Candidate, sw: number) => compactness(c) - 0.15 * (c.crowd ?? 0) + sw * clampScore(c.score);
 
 const compactness = (c: Candidate) => c.area / Math.max(c.bw, c.bh) ** 2;
 
@@ -129,6 +147,8 @@ export type TrackOptions = {
   /** Frames a track may skip (missed detections). */
   maxGap: number;
   minPoints: number;
+  /** How much the model's average ball-likeness adds to a track's score. */
+  scoreWeight?: number;
 };
 
 export function defaultTrackOptions(w: number, h: number): TrackOptions {
@@ -156,6 +176,7 @@ export function track(
     y: c.y,
     r: Math.sqrt(c.area / Math.PI),
     crowd: c.crowd ?? 0,
+    score: clampScore(c.score),
   });
 
   for (let i = 0; i < cands.length - 1; i++) {
@@ -171,7 +192,7 @@ export function track(
             used.add(`${chain[k - 1].i}:${chain[k - 1].x.toFixed(1)}:${chain[k - 1].y.toFixed(1)}>${chain[k].i}:${chain[k].x.toFixed(1)}`);
           }
           if (chain.length < opt.minPoints) continue;
-          const score = scoreTrack(chain) + (prefer ? prefer(chain[chain.length - 1].t) : 0);
+          const score = scoreTrack(chain, opt.scoreWeight ?? 0.8) + (prefer ? prefer(chain[chain.length - 1].t) : 0);
           if (score > bestScore) {
             bestScore = score;
             best = chain;
@@ -224,7 +245,7 @@ function extend(chain: TrackPoint[], cands: Candidate[][], times: number[], opt:
     if (pick) {
       const step = Math.hypot(pick.x - last.x, pick.y - last.y) / steps;
       if (step <= opt.maxStep) {
-        chain.push({ i, t: times[i], x: pick.x, y: pick.y, r: Math.sqrt(pick.area / Math.PI), crowd: pick.crowd ?? 0 });
+        chain.push({ i, t: times[i], x: pick.x, y: pick.y, r: Math.sqrt(pick.area / Math.PI), crowd: pick.crowd ?? 0, score: clampScore(pick.score) });
         gap = 0;
         continue;
       }
@@ -235,7 +256,7 @@ function extend(chain: TrackPoint[], cands: Candidate[][], times: number[], opt:
 }
 
 /** Longer and smoother is better; jittery chains of unrelated blobs score low. */
-function scoreTrack(chain: TrackPoint[]): number {
+function scoreTrack(chain: TrackPoint[], scoreWeight: number): number {
   let jerk = 0;
   for (let k = 2; k < chain.length; k++) {
     const ax = chain[k].x - 2 * chain[k - 1].x + chain[k - 2].x;
@@ -259,7 +280,8 @@ function scoreTrack(chain: TrackPoint[]): number {
     Math.min(path, 400) / 40 -
     (jerk / Math.max(path, 1)) * chain.length -
     1.5 * reversals -
-    1.2 * crowd * Math.sqrt(chain.length)
+    1.2 * crowd * Math.sqrt(chain.length) +
+    scoreWeight * (chain.reduce((a, p) => a + p.score, 0) / chain.length) * Math.sqrt(chain.length)
   );
 }
 

@@ -206,3 +206,31 @@ export function download(blob: Blob, filename: string) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
+
+/**
+ * Phones and tablets that can hand a video to the system share sheet, which has Save Video on an
+ * iPhone and the gallery apps on Android. Browsers only allow this straight after a tap.
+ */
+export function canSaveToPhotos(): boolean {
+  if (typeof navigator === "undefined" || !navigator.canShare || navigator.maxTouchPoints === 0) return false;
+  try {
+    return navigator.canShare({ files: [new File([], "clip.mp4", { type: "video/mp4" })] });
+  } catch {
+    return false;
+  }
+}
+
+export function isApple(): boolean {
+  return typeof navigator !== "undefined" && /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent);
+}
+
+/** Opens the share sheet with the video. Cancelling it is not an error. */
+export async function saveToPhotos(blob: Blob, filename: string): Promise<void> {
+  const file = new File([blob], filename, { type: "video/mp4" });
+  try {
+    await navigator.share({ files: [file] });
+  } catch (err) {
+    if ((err as Error).name === "AbortError") return;
+    throw new Error("Couldn't open the share sheet. Use Download instead.");
+  }
+}

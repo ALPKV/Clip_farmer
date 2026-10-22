@@ -2,13 +2,23 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { download, estimateBytes, exportClip, exportReel, reelBudget } from "@/lib/video/ffmpeg";
+import {
+  canSaveToPhotos,
+  download,
+  estimateBytes,
+  exportClip,
+  exportReel,
+  isApple,
+  reelBudget,
+  saveToPhotos,
+} from "@/lib/video/ffmpeg";
 import { Button, Empty, Meter, Panel, Stat, Tag } from "../ui";
 import { Stage } from "./stage";
 import { FileBar, VideoDrop, clock } from "./video-drop";
 import { PRESETS, useVideo, type Clip, type PresetKey } from "./video-context";
 
 type Reel = { url: string; blob: Blob; clips: number; seconds: number; part: number };
+type Ready = { blob: Blob; name: string; label: string };
 
 /** Splits the clips, in order, into groups that each make a video small enough for this device. */
 function splitForMemory(clips: Clip[], bytes: (c: Clip) => number, budget: number): Clip[][] {
@@ -35,6 +45,10 @@ export function Highlights() {
   const [skip, setSkip] = useState<Set<string>>(new Set());
   const [precise, setPrecise] = useState(false);
   const [reel, setReel] = useState<Reel | null>(null);
+  // A single clip made on a phone, waiting for a tap to save it (the share sheet needs a fresh tap).
+  const [ready, setReady] = useState<Ready | null>(null);
+  const [shareable] = useState(canSaveToPhotos);
+  const photosLabel = isApple() ? "Save to Photos" : "Save to gallery";
 
   // Free the previous highlights video's memory when it is replaced or the page closes.
   useEffect(() => () => {
@@ -46,6 +60,7 @@ export function Highlights() {
   if (forFile !== v.file) {
     setForFile(v.file);
     setReel(null);
+    setReady(null);
     setSkip(new Set());
     setError(null);
   }
@@ -62,6 +77,7 @@ export function Highlights() {
   const estimate = included.reduce((a, c) => a + bytes(c), 0);
   const groups = splitForMemory(included, bytes, reelBudget());
   const seconds = (g: Clip[]) => g.reduce((a, c) => a + (c.end - c.start), 0);
+  const reelName = (part: number) => (groups.length > 1 ? `${base}_highlights_part${part + 1}.mp4` : `${base}_highlights.mp4`);
 
   function toggle(id: string) {
     setSkip((s) => {
@@ -82,6 +98,10 @@ export function Highlights() {
       const blob = await exportReel(v.file!, group, setReelProgress, { precise });
       setReel({ url: URL.createObjectURL(blob), blob, clips: group.length, seconds: seconds(group), part });
     });
+  }
+
+  function save(blob: Blob, name: string) {
+    void run("share", () => saveToPhotos(blob, name));
   }
 
   function play(c: Clip) {
@@ -128,12 +148,12 @@ export function Highlights() {
                       {groups.length > 1 && reel.part + 1 < groups.length ? " Save this part before making the next one." : ""}
                     </p>
                     <div className="flex flex-wrap gap-2">
-                      <Button
-                        tone="gold"
-                        onClick={() =>
-                          download(reel.blob, groups.length > 1 ? `${base}_highlights_part${reel.part + 1}.mp4` : `${base}_highlights.mp4`)
-                        }
-                      >
+                      {shareable ? (
+                        <Button tone="gold" disabled={busy === "share"} onClick={() => save(reel.blob, reelName(reel.part))}>
+                          {photosLabel}
+                        </Button>
+                      ) : null}
+                      <Button tone={shareable ? "ghost" : "gold"} onClick={() => download(reel.blob, reelName(reel.part))}>
                         Download video
                       </Button>
                       {groups.length > 1 && reel.part + 1 < groups.length ? (
@@ -184,6 +204,20 @@ export function Highlights() {
               ) : null}
               {error ? <p className="mt-3 border-l-4 border-risk bg-risk/5 px-3 py-2 text-sm text-risk">{error}</p> : null}
             </Panel>
+          ) : null}
+          {ready ? (
+            <div className="flex flex-wrap items-center gap-3 border-l-4 border-gold bg-white p-4 shadow-sm">
+              <p className="min-w-[160px] flex-1 font-display text-lg font-bold text-navy">{ready.label} is ready</p>
+              <Button tone="gold" size="sm" disabled={busy === "share"} onClick={() => save(ready.blob, ready.name)}>
+                {photosLabel}
+              </Button>
+              <Button tone="ghost" size="sm" onClick={() => download(ready.blob, ready.name)}>
+                Download
+              </Button>
+              <button aria-label="Close" onClick={() => setReady(null)} className="px-2 text-lg leading-none text-mute hover:text-navy">
+                ×
+              </button>
+            </div>
           ) : null}
           <Panel
             title="Clips"
@@ -260,9 +294,12 @@ export function Highlights() {
                                 tone="ghost"
                                 disabled={busy != null}
                                 onClick={() =>
-                                  run(`clip-${c.id}`, async () =>
-                                    download(await exportClip(v.file!, c.start, c.end - c.start), `${base}_clip${k + 1}.mp4`),
-                                  )
+                                  run(`clip-${c.id}`, async () => {
+                                    const blob = await exportClip(v.file!, c.start, c.end - c.start);
+                                    const name = `${base}_clip${k + 1}.mp4`;
+                                    if (shareable) setReady({ blob, name, label: `Clip ${k + 1}` });
+                                    else download(blob, name);
+                                  })
                                 }
                               >
                                 {busy === `clip-${c.id}` ? "…" : "Save"}
@@ -321,13 +358,27 @@ export function Highlights() {
           </Panel>
           <Panel title="Saving videos">
             <p className="text-sm text-slate">
-              <b className="text-ink">Save</b> on a clip downloads just that clip. <b className="text-ink">Create highlights
+              <b className="text-ink">Save</b> on a clip saves just that clip. <b className="text-ink">Create highlights
               video</b> joins the ticked clips into one. Everything is made on this device; nothing is uploaded.
             </p>
             <p className="mt-3 text-sm text-slate">
               Your video stays only in this tab&apos;s memory. It and anything made from it are wiped when you press
               Change video, sign out or close the tab.
             </p>
+            {shareable ? (
+              <p className="mt-3 text-sm text-slate">
+                {isApple() ? (
+                  <>
+                    <b className="text-ink">Save to Photos</b> opens the share sheet: tap <b className="text-ink">Save Video</b>{" "}
+                    and it goes straight into your camera roll.
+                  </>
+                ) : (
+                  <>
+                    <b className="text-ink">Save to gallery</b> opens the share sheet: pick your gallery or Google Photos.
+                  </>
+                )}
+              </p>
+            ) : null}
             <p className="mt-3 text-xs text-mute">The first time, the video engine (about 30 MB) downloads once.</p>
           </Panel>
         </aside>

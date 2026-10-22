@@ -2,6 +2,8 @@
 
 A practice command centre for cricketers, built from the WillowFlow PRD. It grew out of Clip Farmer, an audio-based auto-clipper (the original Streamlit version is in `legacy/`).
 
+**Live:** https://flipper-cricket.vercel.app
+
 | Tab | What it does |
 | --- | --- |
 | **Command Centre** | This week's load, the three pillars (physical, technical, mental), Optimal status, injury-risk alert, goals, badges |

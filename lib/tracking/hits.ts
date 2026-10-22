@@ -21,7 +21,39 @@ export type Impact = {
   levelDb: number;
   /** log10 of high-band over low-band energy: above 0 is a bright crack, well below is a dull thud. */
   hiLo: number;
+  /**
+   * How much more voiced the 150 ms after the sound is than the moment before (0–1). A vowel repeats
+   * 80–400 times a second, so speech scores high; a bat crack dies away into silence or net noise. A
+   * steady hum (a bowling machine) is voiced before and after too, so it doesn't count.
+   */
+  voice: number;
 };
+
+/** Normalised autocorrelation peak over pitch periods of 80–400 Hz, on 8 kHz samples. */
+function voicing(pcm: Int16Array | Float32Array, sampleRate: number, from: number, to: number): number {
+  const step = Math.max(1, Math.round(sampleRate / 8000));
+  const a = Math.max(0, Math.round(from * sampleRate));
+  const b = Math.min(pcm.length, Math.round(to * sampleRate));
+  const x: number[] = [];
+  for (let i = a; i < b; i += step) x.push(pcm[i]);
+  const sr = sampleRate / step;
+  let best = 0;
+  for (let lag = Math.floor(sr / 400); lag <= Math.ceil(sr / 80) && lag < x.length / 2; lag++) {
+    let xy = 0;
+    let xx = 0;
+    let yy = 0;
+    for (let i = 0; i + lag < x.length; i++) {
+      xy += x[i] * x[i + lag];
+      xx += x[i] * x[i];
+      yy += x[i + lag] * x[i + lag];
+    }
+    if (xx > 0 && yy > 0) best = Math.max(best, xy / Math.sqrt(xx * yy));
+  }
+  return best;
+}
+
+/** Talking, not a cricket impact. */
+export const isSpeech = (e: Impact) => e.voice > 0.25;
 
 export type SoundDelivery = {
   /** Time of the first sharp sound of the group: the bat (or stumps) contact. */
@@ -178,8 +210,12 @@ export async function findImpacts(
       peak = Math.max(peak, hi[g]);
       low = Math.max(low, lo[g]);
     }
+    const t = (f * HOP + N / 2) / sampleRate;
+    const voicedAfter = voicing(pcm, sampleRate, t + 0.03, t + 0.18);
+    const voicedBefore = voicing(pcm, sampleRate, t - 0.2, t - 0.05);
     out.push({
-      t: (f * HOP + N / 2) / sampleRate,
+      t,
+      voice: Math.max(0, voicedAfter - Math.max(voicedBefore, 0.5)),
       z: z[f],
       riseDb: 20 * Math.log10(peak / before),
       levelDb: 20 * Math.log10(peak + 1e-9),
@@ -192,7 +228,7 @@ export async function findImpacts(
 
 /** Groups impacts into one entry per ball. */
 export function groupDeliveries(impacts: Impact[]): SoundDelivery[] {
-  const ev = impacts.filter((e) => e.riseDb > 10);
+  const ev = impacts.filter((e) => e.riseDb > 10 && !isSpeech(e));
   const order = ev.map((_, i) => i).sort((a, b) => ev[b].levelDb - ev[a].levelDb);
   const used = new Array(ev.length).fill(false);
   const groups: { contact: number; levelDb: number }[] = [];

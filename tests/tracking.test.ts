@@ -4,7 +4,7 @@ import { detect, defaultDetectOptions, defaultTrackOptions, findBounce, track, t
 import { analyzeFrames } from "../lib/tracking/analyze.ts";
 import { combineDeliveries, motionPeaks } from "../lib/tracking/deliveries.ts";
 import { FEATURE_COUNT } from "../lib/tracking/model.ts";
-import { findImpacts, groupDeliveries, refineContact } from "../lib/tracking/hits.ts";
+import { findImpacts, groupDeliveries, isSpeech, refineContact } from "../lib/tracking/hits.ts";
 import { CREASE_TO_CREASE_M, DEFAULT_SETUP, lengthM, lineCm, speedKmh } from "../lib/tracking/metrics.ts";
 
 test("speed is distance over release-to-contact time", () => {
@@ -102,6 +102,29 @@ test("finds every shot, even two seconds apart, and folds the net thud into its 
   const contacts = sounds.map((d) => refineContact(pcm, sr, d.contact));
   assert.ok(Math.abs(contacts[0] - 2.0) < 0.01, `first at ${contacts[0]}`);
   assert.ok(Math.abs(contacts[1] - 4.0) < 0.01, `second at ${contacts[1]}`);
+});
+
+test("ignores talking: a 't' or 'k' followed by a vowel is not a shot", async () => {
+  const sr = 16000;
+  const pcm = new Float32Array(sr * 6);
+  let seed = 3;
+  const noise = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648) * 2 - 1;
+  for (let k = 0; k < pcm.length; k++) pcm[k] = noise() * 0.003;
+  // A spoken "ta": a short click, then 250 ms of a vowel at 140 Hz (harmonics shaped like a voice).
+  const syl = Math.round(2.0 * sr);
+  for (let k = 0; k < 160; k++) pcm[syl + k] += noise() * 0.7 * Math.exp(-k / 50);
+  for (let k = 160; k < 160 + 0.25 * sr; k++) {
+    let v = 0;
+    for (let hNo = 1; hNo <= 25; hNo++) v += Math.sin((2 * Math.PI * 140 * hNo * k) / sr) / hNo;
+    pcm[syl + k] += 0.25 * v * Math.min(1, (k - 160) / 160);
+  }
+  // A real crack later on.
+  const at = Math.round(4.0 * sr);
+  for (let k = 0; k < 400; k++) pcm[at + k] += noise() * 0.8 * Math.exp(-k / 60);
+  const impacts = await findImpacts(pcm, sr);
+  assert.ok(impacts.some((e) => Math.abs(e.t - 2.0) < 0.05 && isSpeech(e)), "the syllable should be flagged as speech");
+  const sounds = groupDeliveries(impacts).filter((d) => d.rel > -25);
+  assert.deepEqual(sounds.map((d) => Math.round(d.contact)), [4]);
 });
 
 test("adds balls with no bat sound from bowling actions", () => {

@@ -8,6 +8,10 @@ Highlights finds every ball in a net session in two ways, both in the browser:
    returned), so sounds within 1.8 s of the loudest one, and dull thuds up to 2.4 s after, are grouped
    into one delivery. The bat contact is the first sharp sound of the group. A sound counts as a shot
    when it is within the chosen number of dB of the session's big hits (90th percentile).
+   Talking is ignored: a "t" or "k" sounds like a click, but a voiced vowel follows it (it repeats
+   80–400 times a second), while a bat crack dies away into silence or net noise. Sounds clearly more
+   voiced in the 150 ms after than just before are dropped. On the two labelled sessions no real
+   delivery scored above 0.15 (the cut-off is 0.25), so nothing was lost.
 2. **Bowling actions** (`lib/tracking/deliveries.ts`, `lib/video/motion.ts`, opt-in). The video is played
    fast in a hidden player while a 90×160 grey copy is compared about ten times a second of video. A
    bowler running in and bowling is a sharp peak in how much of the picture changes. A peak with no bat

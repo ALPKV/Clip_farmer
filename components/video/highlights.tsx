@@ -1,25 +1,53 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { download, exportClip, exportReel } from "@/lib/video/ffmpeg";
 import { Button, Empty, Meter, Panel, Stat, Tag } from "../ui";
 import { Stage } from "./stage";
 import { FileBar, VideoDrop, clock } from "./video-drop";
 import { PRESETS, useVideo, type Clip, type PresetKey } from "./video-context";
 
-export function ClipFarmer() {
+type Reel = { url: string; blob: Blob; clips: number; seconds: number };
+
+export function Highlights() {
   const v = useVideo();
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reelProgress, setReelProgress] = useState(0);
+  const [skip, setSkip] = useState<Set<string>>(new Set());
+  const [precise, setPrecise] = useState(false);
+  const [reel, setReel] = useState<Reel | null>(null);
+
+  // Free the previous highlights video's memory when it is replaced or the page closes.
+  useEffect(() => () => {
+    if (reel) URL.revokeObjectURL(reel.url);
+  }, [reel]);
 
   if (!v.file) return <VideoDrop />;
 
   const selected = v.clips.find((c) => c.id === v.selectedId) ?? null;
-  const total = v.clips.reduce((a, c) => a + (c.end - c.start), 0);
+  const included = v.clips.filter((c) => !skip.has(c.id));
+  const total = included.reduce((a, c) => a + (c.end - c.start), 0);
   const base = v.file.name.replace(/\.[^.]+$/, "");
+
+  function toggle(id: string) {
+    setSkip((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }
+
+  function buildReel() {
+    void run("reel", async () => {
+      setReelProgress(0);
+      const blob = await exportReel(v.file!, included, setReelProgress, { precise });
+      setReel({ url: URL.createObjectURL(blob), blob, clips: included.length, seconds: total });
+    });
+  }
 
   function play(c: Clip) {
     v.select(c.id);
@@ -42,7 +70,7 @@ export function ClipFarmer() {
     <div className="space-y-5">
       <FileBar />
       <div className="grid gap-px bg-line sm:grid-cols-3">
-        <Stat label="Clips found" value={v.clips.length} />
+        <Stat label="Clips found" value={v.clips.length} note={`${included.length} in the highlights video`} />
         <Stat label="Highlights length" value={clock(total)} />
         <Stat label="Detection" value={PRESETS[v.settings.preset].label} note={`Loudness above ${v.settings.sensitivity.toFixed(2)}`} />
       </div>
@@ -50,6 +78,55 @@ export function ClipFarmer() {
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="space-y-5">
           <Stage clip={selected} />
+          {v.clips.length > 0 ? (
+            <Panel title="Highlights video">
+              {reel ? (
+                <div className="grid gap-4 md:grid-cols-[minmax(0,240px)_1fr]">
+                  <video src={reel.url} controls playsInline className="w-full bg-navy-950" />
+                  <div className="space-y-3">
+                    <p className="display text-2xl font-extrabold text-navy">Your highlights are ready</p>
+                    <p className="text-sm text-slate">
+                      {reel.clips} clips · about {clock(reel.seconds)} · {(reel.blob.size / 1_048_576).toFixed(1)} MB. Watch it
+                      here, then save it.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button tone="gold" onClick={() => download(reel.blob, `${base}_highlights.mp4`)}>
+                        Download video
+                      </Button>
+                      <Button tone="ghost" onClick={() => setReel(null)}>
+                        Make another
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-4">
+                  <div className="min-w-[200px] flex-1">
+                    <p className="text-sm text-slate">
+                      Joins the <b className="text-ink">{included.length}</b> ticked clips below, in order, into one video (
+                      {clock(total)}). Untick any you don&apos;t want.
+                    </p>
+                    <label className="mt-2 flex items-start gap-2 text-sm">
+                      <input type="checkbox" className="mt-1" checked={precise} onChange={(e) => setPrecise(e.target.checked)} />
+                      <span>
+                        <b>Exact cuts</b>: every clip starts on the exact frame. Slower (re-encodes, 1080p max). Without it,
+                        clips can start up to a second early, but it takes seconds.
+                      </span>
+                    </label>
+                  </div>
+                  <Button tone="gold" disabled={busy != null || included.length === 0} onClick={buildReel}>
+                    {busy === "reel" ? `Building ${Math.round(reelProgress * 100)}%` : "Create highlights video"}
+                  </Button>
+                </div>
+              )}
+              {busy === "reel" ? (
+                <div className="mt-3">
+                  <Meter value={reelProgress} max={1} tone="gold" />
+                </div>
+              ) : null}
+              {error ? <p className="mt-3 border-l-4 border-risk bg-risk/5 px-3 py-2 text-sm text-risk">{error}</p> : null}
+            </Panel>
+          ) : null}
           <Panel
             title="Clips"
             flush
@@ -77,7 +154,10 @@ export function ClipFarmer() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-navy text-left font-display text-[0.8rem] uppercase tracking-wider text-white">
-                      <th className="px-4 py-2 font-bold">#</th>
+                      <th className="w-10 px-4 py-2 font-bold">
+                        <span className="sr-only">Include</span>
+                      </th>
+                      <th className="px-2 py-2 font-bold">#</th>
                       <th className="px-2 py-2 font-bold">Start</th>
                       <th className="px-2 py-2 font-bold">Contact</th>
                       <th className="px-2 py-2 font-bold">Loudness</th>
@@ -88,8 +168,19 @@ export function ClipFarmer() {
                     {v.clips.map((c, k) => {
                       const active = c.id === v.selectedId;
                       return (
-                        <tr key={c.id} className={`border-b border-line ${active ? "bg-gold/15" : k % 2 ? "bg-paper/60" : ""}`}>
-                          <td className="px-4 py-2 font-display font-bold text-navy">{String(k + 1).padStart(2, "0")}</td>
+                        <tr
+                          key={c.id}
+                          className={`border-b border-line ${active ? "bg-gold/15" : k % 2 ? "bg-paper/60" : ""} ${skip.has(c.id) ? "text-mute" : ""}`}
+                        >
+                          <td className="px-4 py-2">
+                            <input
+                              type="checkbox"
+                              checked={!skip.has(c.id)}
+                              onChange={() => toggle(c.id)}
+                              aria-label={`Include clip ${k + 1} in the highlights video`}
+                            />
+                          </td>
+                          <td className="px-2 py-2 font-display font-bold text-navy">{String(k + 1).padStart(2, "0")}</td>
                           <td className="px-2 py-2 tabular-nums">{clock(c.start)}</td>
                           <td className="px-2 py-2 tabular-nums">{c.contact != null ? clock(c.contact) : <Tag tone="mute">Manual</Tag>}</td>
                           <td className="w-32 px-2 py-2">{c.level != null ? <Meter value={c.level} max={0.6} tone="gold" /> : "—"}</td>
@@ -170,26 +261,12 @@ export function ClipFarmer() {
             <Slider label="Gap between shots" value={v.settings.minGap} min={1} max={10} step={0.5} format={(n) => `${n.toFixed(1)} s`}
               onChange={(n) => v.setSettings({ ...v.settings, minGap: n })} />
           </Panel>
-          <Panel title="Export">
+          <Panel title="Saving videos">
             <p className="text-sm text-slate">
-              Joins every clip into one highlights reel without re-encoding, so it is quick and keeps the original quality.
-              Each cut starts at the nearest keyframe, usually under a second early.
+              <b className="text-ink">Save</b> on a clip downloads just that clip. <b className="text-ink">Create highlights
+              video</b> joins the ticked clips into one. Everything is made on this device; nothing is uploaded.
             </p>
-            <Button
-              className="mt-3 w-full"
-              tone="gold"
-              disabled={busy != null || v.clips.length === 0}
-              onClick={() =>
-                run("reel", async () => {
-                  setReelProgress(0);
-                  download(await exportReel(v.file!, v.clips, setReelProgress), `${base}_highlights.mp4`);
-                })
-              }
-            >
-              {busy === "reel" ? `Building reel ${Math.round(reelProgress * 100)}%` : "Download highlights reel"}
-            </Button>
-            {error ? <p className="mt-3 border-l-4 border-risk bg-risk/5 px-3 py-2 text-sm text-risk">{error}</p> : null}
-            <p className="mt-3 text-xs text-mute">The first export downloads the video engine (about 30 MB), once.</p>
+            <p className="mt-3 text-xs text-mute">The first time, the video engine (about 30 MB) downloads once.</p>
           </Panel>
         </aside>
       </div>

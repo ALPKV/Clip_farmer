@@ -8,7 +8,7 @@ import { extractAudio } from "@/lib/video/ffmpeg";
 import { captureFrames } from "@/lib/video/frames";
 
 /**
- * The loaded video and everything derived from it, shared by the Clip Farmer and Ball Tracking
+ * The loaded video and everything derived from it, shared by the Highlights and Ball Tracking
  * tabs so switching tabs keeps your work. Nothing here leaves the browser.
  */
 

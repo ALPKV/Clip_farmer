@@ -88,11 +88,18 @@ export async function extractAudio(
   });
 }
 
-/** Cuts [start, start+duration) without re-encoding; the cut snaps to the keyframe before `start`. */
-async function cut(ff: FFmpeg, path: string, start: number, duration: number, out: string) {
+/**
+ * Cuts [start, start+duration). Fast mode copies the stream (seconds, original quality, but the cut
+ * snaps to the keyframe before `start`). Precise mode re-encodes, so every clip starts on the exact
+ * frame; it is slower and scales anything larger than 1080p down to 1080p.
+ */
+async function cut(ff: FFmpeg, path: string, start: number, duration: number, out: string, precise = false) {
+  const codec = precise
+    ? ["-vf", "scale='min(1080,iw)':-2", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "22", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2"]
+    : ["-c", "copy", "-avoid_negative_ts", "make_zero"];
   const code = await ff.exec([
     "-ss", start.toFixed(3), "-i", path, "-t", duration.toFixed(3),
-    "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", out,
+    "-map", "0:v:0", "-map", "0:a:0?", ...codec, "-movflags", "+faststart", out,
   ]);
   if (code !== 0) throw new Error("FFmpeg could not cut this clip.");
 }
@@ -106,17 +113,18 @@ export async function exportClip(file: File, start: number, duration: number): P
   });
 }
 
-/** Joins the clips into one highlights reel (stream copy, so it takes seconds, not minutes). */
+/** Joins the clips, in order, into one highlights video. */
 export async function exportReel(
   file: File,
   clips: { start: number; end: number }[],
   onProgress?: (fraction: number) => void,
+  { precise = false }: { precise?: boolean } = {},
 ): Promise<Blob> {
   return withFile(file, async (ff, path) => {
     const names: string[] = [];
     for (let k = 0; k < clips.length; k++) {
       const name = `/part${k}.mp4`;
-      await cut(ff, path, clips[k].start, clips[k].end - clips[k].start, name);
+      await cut(ff, path, clips[k].start, clips[k].end - clips[k].start, name, precise);
       names.push(name);
       onProgress?.((k + 1) / (clips.length + 1));
     }

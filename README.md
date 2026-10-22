@@ -1,6 +1,6 @@
 # Flipper
 
-A practice command centre for cricketers, built from the WillowFlow PRD, with Clip Farmer inside it.
+A practice command centre for cricketers, built from the WillowFlow PRD. It grew out of Clip Farmer, an audio-based auto-clipper (the original Streamlit version is in `legacy/`).
 
 | Tab | What it does |
 | --- | --- |
@@ -11,7 +11,7 @@ A practice command centre for cricketers, built from the WillowFlow PRD, with Cl
 | **Mindset** | Strengths and weaknesses inventory, intent vs reflection |
 | **Goals** | Season targets that update from your logs (targets are fixed once set), badges |
 | **Fuel** | Carb tracker with daily targets from body weight and day type |
-| **Clip Farmer** | Drop in an unedited net session: shots are found from the audio (bat-on-ball crack) and clipped. Export a highlights reel. |
+| **Highlights** | Drop in an unedited net session: shots are found from the audio (bat-on-ball crack) and clipped. Tick the clips you want and join them into one highlights video (fast, or exact frame cuts). |
 | **Ball Tracking** | Follows the ball through a clip and draws it over the video (toggle on and off). Times speed and length from release, bounce and contact marks. Pitch map. |
 | **Portfolio** | Printable summary for coaches and academies |
 
@@ -51,7 +51,7 @@ npm run typecheck
 You do this once; after that every push to `main` redeploys automatically.
 
 1. Go to [vercel.com](https://vercel.com), choose **Sign up → Continue with GitHub**, and pick the free **Hobby** plan.
-2. Click **Add New → Project**, find **Clip_farmer**, click **Import**, then **Deploy**. Leave every setting as it is.
+2. Click **Add New → Project**, find **Flipper**, click **Import**, then **Deploy**. Leave every setting as it is.
    The first deploy shows an error page saying the database isn't set up. That's expected.
 3. In the project, open **Storage → Create Database → Neon (Serverless Postgres)**, choose the free plan,
    and connect it to the project for all environments. This adds `DATABASE_URL` for you.
@@ -67,12 +67,12 @@ request after a quiet spell takes a second or two longer.
 | Path | What it is |
 | --- | --- |
 | `app/` | Pages (`(app)/…` signed-in tabs, `(auth)/…` sign-in) and the API (`app/api/…`) |
-| `components/` | UI. `components/video/` is Clip Farmer and Ball Tracking. |
+| `components/` | UI. `components/video/` is Highlights and Ball Tracking. |
 | `lib/domain.ts` | PRD rules: workload, 20% spike, 2-hour logging window, pillars, badges, carb ranges |
 | `lib/tracking/` | Ball detection and tracking, bounce detection, audio hit detection, speed/length/line maths |
 | `lib/video/` | FFmpeg.wasm (audio, clip and reel export) and frame capture |
 | `lib/db.ts`, `lib/schema.ts` | Database connection and tables (created automatically) |
-| `legacy/` | The original Streamlit version of Clip Farmer, kept for reference |
+| `legacy/` | The original Streamlit version (then called Clip Farmer), kept for reference |
 
 ## Security notes
 

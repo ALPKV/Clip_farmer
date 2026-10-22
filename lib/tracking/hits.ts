@@ -1,5 +1,5 @@
 /**
- * Bat-contact detection from the audio track (the original Clip Farmer method, ported from
+ * Bat-contact detection from the audio track (the method from the original Streamlit app, ported from
  * librosa): a hit is an RMS loudness peak above `sensitivity`, at least `minGapSec` after the
  * previous one. Each hit is then refined to the sharpest transient nearby, which pins the
  * contact to within a few milliseconds.

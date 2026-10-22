@@ -13,7 +13,7 @@ const NAV = [
   { href: "/mindset", label: "Mindset" },
   { href: "/goals", label: "Goals" },
   { href: "/fuel", label: "Fuel" },
-  { href: "/clips", label: "Clip Farmer" },
+  { href: "/highlights", label: "Highlights" },
   { href: "/tracking", label: "Ball Tracking" },
 ];
 

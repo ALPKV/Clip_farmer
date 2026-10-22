@@ -8,7 +8,7 @@ const PILLARS = [
   { n: "01", title: "Plan", body: "Open nets, scenario nets, drills, machine work, spot bowling, new skills and conditioning, each with an intent written before you start." },
   { n: "02", title: "Load", body: "Minutes × effort for every session. A calendar of work and recovery, and a red flag when your week jumps more than 20%." },
   { n: "03", title: "Perform", body: "Match logs with error analysis, season goals that update themselves, badges for consistency, and a carb tracker for match days." },
-  { n: "04", title: "Review", body: "Drop in a full net session. Clip Farmer cuts every shot from the audio; Ball Tracking follows the ball and times its speed." },
+  { n: "04", title: "Review", body: "Drop in a full net session. Highlights cuts every shot from the audio and joins them into one video; Ball Tracking follows the ball and times its speed." },
 ];
 
 export default async function Home() {
@@ -83,7 +83,7 @@ export default async function Home() {
             <h2 className="display mt-2 text-4xl font-extrabold text-navy">Your videos never leave your device</h2>
           </div>
           <p className="text-slate">
-            Clip Farmer and Ball Tracking run entirely in your browser. A 20-minute net session is scanned for
+            Highlights and Ball Tracking run entirely in your browser. A 20-minute net session is scanned for
             bat-on-ball contact, clipped and tracked on your own computer, so there are no uploads, no queue and no
             cost. Speed and length are timing estimates: you can check every mark frame by frame.
           </p>

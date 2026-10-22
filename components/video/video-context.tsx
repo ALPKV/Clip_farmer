@@ -2,10 +2,12 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { analyzeFrames, type BallAnalysis } from "@/lib/tracking/analyze";
-import { detectHits, type Hit } from "@/lib/tracking/hits";
+import { combineDeliveries, motionPeaks, type MotionPeak } from "@/lib/tracking/deliveries";
+import { findImpacts, groupDeliveries, refineContact, type SoundDelivery } from "@/lib/tracking/hits";
 import { DEFAULT_SETUP, lengthM, lineCm, speedKmh, type Setup } from "@/lib/tracking/metrics";
 import { extractAudio, releaseEngine } from "@/lib/video/ffmpeg";
 import { captureFrames } from "@/lib/video/frames";
+import { scanMotion } from "@/lib/video/motion";
 
 /**
  * The loaded video and everything derived from it, shared by the Highlights and Ball Tracking
@@ -13,17 +15,28 @@ import { captureFrames } from "@/lib/video/frames";
  * (and the video engine shut down) when the video is removed, you sign out or the tab closes.
  */
 
+/** How quiet a bat sound can be, in dB below the session's big hits, and still count as a shot. */
 export const PRESETS = {
-  aggressive: { label: "Aggressive shots", sensitivity: 0.2, note: "Hard-hit shots and boundaries" },
-  balanced: { label: "Balanced", sensitivity: 0.15, note: "A mix of all shots" },
-  defensive: { label: "Defensive play", sensitivity: 0.1, note: "Soft touches and edges" },
-  custom: { label: "Custom", sensitivity: 0.15, note: "Set your own threshold" },
+  big: { label: "Big hits", threshold: -10, note: "Only the loudest shots" },
+  every: { label: "Every shot", threshold: -25, note: "All bat sounds, soft ones too" },
+  everything: { label: "Everything", threshold: -32, note: "Edges and faint clicks; a few extras" },
+  custom: { label: "Custom", threshold: -25, note: "Set your own threshold" },
 } as const;
 export type PresetKey = keyof typeof PRESETS;
 
-export type ClipSettings = { preset: PresetKey; sensitivity: number; leadIn: number; length: number; minGap: number };
+export type ClipSettings = { preset: PresetKey; threshold: number; leadIn: number; length: number };
 
-export type Clip = { id: string; start: number; end: number; contact: number | null; level: number | null; manual: boolean };
+export type Clip = {
+  id: string;
+  start: number;
+  end: number;
+  /** Bat (or stumps) contact from the sound; null for balls with no bat sound and manual clips. */
+  contact: number | null;
+  /** Sound strength against the session's big hits, in dB. */
+  level: number | null;
+  kind: "bat" | "no-sound" | "manual";
+  manual: boolean;
+};
 
 export type MarkKey = "release" | "bounce" | "contact";
 export type Marks = Record<MarkKey, { t: number | null; source: "auto" | "manual" | null }>;
@@ -38,6 +51,7 @@ export type AnalysisState = {
 export type TrackingSetup = Setup & { stumps: { leftX: number; rightX: number } | null };
 
 type AudioState = { status: "idle" | "loading" | "ready" | "error" | "none"; progress: number; error: string | null };
+type MotionState = { status: "idle" | "running" | "done" | "error"; progress: number; error: string | null; peaks: MotionPeak[] | null };
 
 type Ctx = {
   file: File | null;
@@ -46,6 +60,9 @@ type Ctx = {
   loadFile: (f: File) => void;
   clearFile: () => void;
   audio: AudioState;
+  /** The scan for bowling actions, which finds balls that made no bat sound. */
+  motion: MotionState;
+  scanForSilentBalls: () => void;
   settings: ClipSettings;
   setSettings: (s: ClipSettings) => void;
   clips: Clip[];
@@ -77,7 +94,8 @@ export function useVideo(): Ctx {
   return v;
 }
 
-const DEFAULT_SETTINGS: ClipSettings = { preset: "balanced", sensitivity: 0.15, leadIn: 1, length: 2.5, minGap: 3 };
+const DEFAULT_SETTINGS: ClipSettings = { preset: "every", threshold: -25, leadIn: 1, length: 2.5 };
+const NO_MOTION: MotionState = { status: "idle", progress: 0, error: null, peaks: null };
 const DEFAULT_TRACKING: TrackingSetup = { ...DEFAULT_SETUP, stumps: null };
 
 const emptyMarks = (): Marks => ({
@@ -99,7 +117,9 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
   const [url, setUrl] = useState<string | null>(null);
   const [meta, setMeta] = useState<Ctx["meta"]>(null);
   const [audio, setAudio] = useState<AudioState>({ status: "idle", progress: 0, error: null });
-  const [pcm, setPcm] = useState<{ pcm: Float32Array; sampleRate: number; fps: number | null } | null>(null);
+  const [sounds, setSounds] = useState<SoundDelivery[] | null>(null);
+  const [fps, setFps] = useState<number | null>(null);
+  const [motion, setMotion] = useState<MotionState>(NO_MOTION);
   const [settings, setSettings] = useState<ClipSettings>(DEFAULT_SETTINGS);
   const [manual, setManual] = useState<Clip[]>([]);
   const [removed, setRemoved] = useState<Set<string>>(new Set());
@@ -129,7 +149,9 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
       return null;
     });
     setMeta(null);
-    setPcm(null);
+    setSounds(null);
+    setFps(null);
+    setMotion(NO_MOTION);
     setAudio({ status: "idle", progress: 0, error: null });
     setManual([]);
     setRemoved(new Set());
@@ -156,10 +178,17 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
         probe.removeAttribute("src");
       };
       setAudio({ status: "loading", progress: 0, error: null });
-      extractAudio(f, (p) => token === loadToken.current && setAudio((a) => ({ ...a, progress: p })))
-        .then((res) => {
+      const progress = (p: number) => token === loadToken.current && setAudio((a) => ({ ...a, progress: p }));
+      // Reading the sound is the first 60%, listening for impacts the rest. Only the list of
+      // deliveries is kept; the audio itself is dropped as soon as it has been analysed.
+      extractAudio(f, (p) => progress(p * 0.6))
+        .then(async (res) => {
           if (token !== loadToken.current) return;
-          setPcm(res);
+          const impacts = await findImpacts(res.pcm, res.sampleRate, (p) => progress(0.6 + p * 0.4));
+          if (token !== loadToken.current) return;
+          const grouped = groupDeliveries(impacts).map((d) => ({ ...d, contact: refineContact(res.pcm, res.sampleRate, d.contact) }));
+          setSounds(grouped);
+          setFps(res.fps);
           setAudio({ status: "ready", progress: 1, error: null });
         })
         .catch((err: Error) => {
@@ -174,32 +203,66 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
     [clearFile],
   );
 
-  const hits: Hit[] = useMemo(
-    () => (pcm ? detectHits(pcm.pcm, pcm.sampleRate, settings.sensitivity, settings.minGap) : []),
-    [pcm, settings.sensitivity, settings.minGap],
+  const scanForSilentBalls = useCallback(() => {
+    if (!url || motion.status === "running") return;
+    const token = loadToken.current;
+    setMotion({ status: "running", progress: 0, error: null, peaks: null });
+    scanMotion(
+      url,
+      (p) => token === loadToken.current && setMotion((m) => ({ ...m, progress: p })),
+      () => token !== loadToken.current,
+    )
+      .then((series) => {
+        if (token === loadToken.current) setMotion({ status: "done", progress: 1, error: null, peaks: motionPeaks(series) });
+      })
+      .catch((err: Error) => {
+        if (token === loadToken.current) setMotion({ status: "error", progress: 0, error: err.message, peaks: null });
+      });
+  }, [url, motion.status]);
+
+  const deliveries = useMemo(
+    () => (sounds ? combineDeliveries(sounds, motion.peaks, settings.threshold) : []),
+    [sounds, motion.peaks, settings.threshold],
   );
 
   const clips: Clip[] = useMemo(() => {
     const duration = meta?.duration ?? Infinity;
-    const auto: Clip[] = hits.map((h) => {
-      const start = Math.max(0, h.time - settings.leadIn);
+    const auto: Clip[] = deliveries.map((d, k) => {
+      // A ball with no bat sound is anchored where it reaches the batter; show its release too.
+      const lead = settings.leadIn + (d.kind === "no-sound" ? 0.5 : 0);
+      let start = Math.max(0, d.t - lead);
+      let end = Math.min(duration, start + settings.length + (d.kind === "no-sound" ? 0.5 : 0));
+      // Never show the previous or next shot: stop short of the neighbouring deliveries.
+      const prev = deliveries[k - 1];
+      const next = deliveries[k + 1];
+      if (prev) start = Math.min(Math.max(start, prev.t + 0.3), d.t - 0.4);
+      if (next) end = Math.max(Math.min(end, next.t - 0.3), d.t + 0.5);
       return {
-        id: `a${h.time.toFixed(3)}`,
+        id: `${d.kind === "bat" ? "a" : "s"}${d.t.toFixed(3)}`,
         start,
-        end: Math.min(duration, start + settings.length),
-        contact: h.time,
-        level: h.level,
+        end,
+        contact: d.kind === "bat" ? d.t : null,
+        level: d.rel,
+        kind: d.kind,
         manual: false,
       };
     });
     return [...auto.filter((c) => !removed.has(c.id)), ...manual].sort((a, b) => a.start - b.start);
-  }, [hits, manual, removed, settings.leadIn, settings.length, meta]);
+  }, [deliveries, manual, removed, settings.leadIn, settings.length, meta]);
 
   const addManualClip = useCallback(
     (time: number) => {
       const duration = meta?.duration ?? time + 2;
       const start = Math.max(0, time - 1.5);
-      const clip: Clip = { id: `m${time.toFixed(3)}`, start, end: Math.min(duration, time + 1), contact: null, level: null, manual: true };
+      const clip: Clip = {
+        id: `m${time.toFixed(3)}`,
+        start,
+        end: Math.min(duration, time + 1),
+        contact: null,
+        level: null,
+        kind: "manual",
+        manual: true,
+      };
       setManual((m) => (m.some((c) => c.id === clip.id) ? m : [...m, clip]));
       return clip;
     },
@@ -234,7 +297,7 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
           end,
           360,
           (p) => setAnalyses((a) => ({ ...a, [id]: { ...a[id], progress: p * 0.9 } })),
-          pcm?.fps ?? null,
+          fps,
         );
         if (frames.length < 6) throw new Error("Too few frames in this clip to track the ball.");
         const result = analyzeFrames(frames, times, clip.contact);
@@ -259,7 +322,7 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
         }));
       }
     },
-    [url, meta, pcm],
+    [url, meta, fps],
   );
 
   const seek = useCallback((t: number, play = false) => {
@@ -278,6 +341,8 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
     loadFile,
     clearFile,
     audio,
+    motion,
+    scanForSilentBalls,
     settings,
     setSettings,
     clips,

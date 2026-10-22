@@ -1,0 +1,10 @@
+{
+  "netsA": {
+    "note": "Outdoor nets, phone behind the bowler's stumps, 70 s. Release times read frame by frame.",
+    "releases": [0.6, 8.6, 12.1, 15.6, 19.3, 22.8, 26.3, 29.8, 33.2, 36.4, 39.8, 43.2, 46.4, 50.0, 53.2, 56.8, 60.4, 63.6, 67.0]
+  },
+  "netsB": {
+    "note": "Indoor turf nets, phone behind the bowler's stumps, 79 s, several bowlers in turn. Release times read frame by frame.",
+    "releases": [1.45, 5.0, 9.05, 12.81, 17.15, 20.55, 24.45, 28.95, 31.95, 35.35, 38.45, 42.25, 46.25, 49.95, 54.75, 58.15, 61.75, 65.55, 69.35, 72.65, 76.85]
+  }
+}

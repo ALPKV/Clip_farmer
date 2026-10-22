@@ -13,7 +13,7 @@ A practice command centre for cricketers, built from the WillowFlow PRD. It grew
 | **Mindset** | Strengths and weaknesses inventory, intent vs reflection |
 | **Goals** | Season targets that update from your logs (targets are fixed once set), badges |
 | **Fuel** | Carb tracker with daily targets from body weight and day type |
-| **Highlights** | Drop in an unedited net session: shots are found from the audio (bat-on-ball crack) and clipped. Tick the clips you want and join them into one highlights video (fast, or exact frame cuts). |
+| **Highlights** | Drop in an unedited net session: every ball gets its own clip, found from the bat sound and, optionally, from the bowler's action (for misses, leaves and bowled balls). Tick the clips you want and join them into one highlights video (fast, or exact frame cuts). See `scripts/deliveries/README.md`. |
 | **Ball Tracking** | Follows the ball through a clip and draws it over the video (toggle on and off). Times speed and length from release, bounce and contact marks. Pitch map. |
 | **Portfolio** | Printable summary for coaches and academies |
 
@@ -71,8 +71,8 @@ request after a quiet spell takes a second or two longer.
 | `app/` | Pages (`(app)/…` signed-in tabs, `(auth)/…` sign-in) and the API (`app/api/…`) |
 | `components/` | UI. `components/video/` is Highlights and Ball Tracking. |
 | `lib/domain.ts` | PRD rules: workload, 20% spike, 2-hour logging window, pillars, badges, carb ranges |
-| `lib/tracking/` | Ball detection and tracking, bounce detection, audio hit detection, speed/length/line maths |
-| `lib/video/` | FFmpeg.wasm (audio, clip and reel export) and frame capture |
+| `lib/tracking/` | Ball detection and tracking, bounce detection, delivery finding (bat sounds, bowling actions), speed/length/line maths |
+| `lib/video/` | FFmpeg.wasm (audio, clip and reel export), frame capture and the motion scan |
 | `lib/db.ts`, `lib/schema.ts` | Database connection and tables (created automatically) |
 | `legacy/` | The original Streamlit version (then called Clip Farmer), kept for reference |
 

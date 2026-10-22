@@ -127,7 +127,11 @@ export function Highlights() {
       <div className="grid gap-px bg-line sm:grid-cols-3">
         <Stat label="Clips found" value={v.clips.length} note={`${included.length} in the highlights video`} />
         <Stat label="Highlights length" value={clock(total)} />
-        <Stat label="Detection" value={PRESETS[v.settings.preset].label} note={`Loudness above ${v.settings.sensitivity.toFixed(2)}`} />
+        <Stat
+          label="Detection"
+          value={PRESETS[v.settings.preset].label}
+          note={v.motion.status === "done" ? "Bat sounds and bowling actions" : "From bat sounds"}
+        />
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
@@ -238,7 +242,9 @@ export function Highlights() {
             {v.clips.length === 0 ? (
               v.audio.status === "ready" ? (
                 <div className="p-4">
-                  <Empty title="No shots detected">Lower the sensitivity, or add clips by hand from the playhead.</Empty>
+                  <Empty title="No shots detected">
+                    Try <b>Everything</b>, scan for balls with no bat sound, or add clips by hand from the playhead.
+                  </Empty>
                 </div>
               ) : null
             ) : (
@@ -252,7 +258,7 @@ export function Highlights() {
                       <th className="px-2 py-2 font-bold">#</th>
                       <th className="px-2 py-2 font-bold">Start</th>
                       <th className="px-2 py-2 font-bold">Contact</th>
-                      <th className="px-2 py-2 font-bold">Loudness</th>
+                      <th className="px-2 py-2 font-bold">Found by</th>
                       <th className="px-4 py-2 text-right font-bold">Actions</th>
                     </tr>
                   </thead>
@@ -274,8 +280,19 @@ export function Highlights() {
                           </td>
                           <td className="px-2 py-2 font-display font-bold text-navy">{String(k + 1).padStart(2, "0")}</td>
                           <td className="px-2 py-2 tabular-nums">{clock(c.start)}</td>
-                          <td className="px-2 py-2 tabular-nums">{c.contact != null ? clock(c.contact) : <Tag tone="mute">Manual</Tag>}</td>
-                          <td className="w-32 px-2 py-2">{c.level != null ? <Meter value={c.level} max={0.6} tone="gold" /> : "—"}</td>
+                          <td className="px-2 py-2 tabular-nums">{c.contact != null ? clock(c.contact) : "—"}</td>
+                          <td className="w-36 px-2 py-2">
+                            {c.kind === "bat" ? (
+                              <span className="flex items-center gap-2" title={`${Math.round(c.level ?? 0)} dB against your big hits`}>
+                                <Tag>Bat</Tag>
+                                <span className="w-14"><Meter value={Math.max(0, (c.level ?? -40) + 40)} max={40} tone="gold" /></span>
+                              </span>
+                            ) : c.kind === "no-sound" ? (
+                              <Tag tone="gold">No bat sound</Tag>
+                            ) : (
+                              <Tag tone="mute">Manual</Tag>
+                            )}
+                          </td>
                           <td className="px-4 py-2">
                             <div className="flex justify-end gap-1.5">
                               <Button size="sm" tone="ghost" onClick={() => play(c)}>Play</Button>
@@ -333,7 +350,7 @@ export function Highlights() {
                   <button
                     key={k}
                     onClick={() =>
-                      v.setSettings({ ...v.settings, preset: k, sensitivity: k === "custom" ? v.settings.sensitivity : PRESETS[k].sensitivity })
+                      v.setSettings({ ...v.settings, preset: k, threshold: k === "custom" ? v.settings.threshold : PRESETS[k].threshold })
                     }
                     className={`border px-2 py-2 text-left text-xs ${
                       v.settings.preset === k ? "border-navy bg-navy text-white" : "border-line bg-white text-ink hover:border-navy"
@@ -346,16 +363,18 @@ export function Highlights() {
               </div>
             </fieldset>
             {v.settings.preset === "custom" ? (
-              <Slider label="Sensitivity" value={v.settings.sensitivity} min={0.05} max={0.4} step={0.01} format={(n) => n.toFixed(2)}
-                onChange={(n) => v.setSettings({ ...v.settings, sensitivity: n })} />
+              <Slider label="Quietest shot" value={v.settings.threshold} min={-40} max={-5} step={1} format={(n) => `${n} dB`}
+                onChange={(n) => v.setSettings({ ...v.settings, threshold: n })} />
             ) : null}
             <Slider label="Lead-in" value={v.settings.leadIn} min={0.5} max={4} step={0.1} format={(n) => `${n.toFixed(1)} s`}
               onChange={(n) => v.setSettings({ ...v.settings, leadIn: n })} />
             <Slider label="Clip length" value={v.settings.length} min={1} max={15} step={0.5} format={(n) => `${n.toFixed(1)} s`}
               onChange={(n) => v.setSettings({ ...v.settings, length: n })} />
-            <Slider label="Gap between shots" value={v.settings.minGap} min={1} max={10} step={0.5} format={(n) => `${n.toFixed(1)} s`}
-              onChange={(n) => v.setSettings({ ...v.settings, minGap: n })} />
+            <p className="mt-4 text-xs text-mute">
+              Every ball gets its own clip, however close together. Clips stop short of the next shot.
+            </p>
           </Panel>
+          <SilentBalls />
           <Panel title="Saving videos">
             <p className="text-sm text-slate">
               <b className="text-ink">Save</b> on a clip saves just that clip. <b className="text-ink">Create highlights
@@ -442,5 +461,41 @@ function Slider({
         className="mt-1 w-full accent-[#00175f]"
       />
     </label>
+  );
+}
+
+/** The optional bowling-action scan: finds misses, leaves and bowled balls that made no bat sound. */
+function SilentBalls() {
+  const { motion, scanForSilentBalls, clips, audio } = useVideo();
+  const found = clips.filter((c) => c.kind === "no-sound").length;
+  return (
+    <Panel title="Balls with no bat sound">
+      <p className="text-sm text-slate">
+        Misses, leaves and balls that beat the bat make little sound. Scanning watches for the bowler&apos;s action
+        instead, and adds a clip for every ball that had no bat sound.
+      </p>
+      {motion.status === "running" ? (
+        <div className="mt-3 space-y-2">
+          <p className="text-sm text-slate">Watching for bowling actions… {Math.round(motion.progress * 100)}%</p>
+          <Meter value={motion.progress} max={1} />
+        </div>
+      ) : motion.status === "done" ? (
+        <p className="mt-3 text-sm text-ink">
+          <b>{found}</b> {found === 1 ? "ball" : "balls"} with no bat sound added, tagged <Tag tone="gold">No bat sound</Tag>.
+          Remove any that aren&apos;t a delivery.
+        </p>
+      ) : (
+        <>
+          <Button className="mt-3" size="sm" tone="navy" disabled={audio.status === "loading"} onClick={scanForSilentBalls}>
+            Scan for bowling actions
+          </Button>
+          <p className="mt-2 text-xs text-mute">
+            Plays the video fast in the background, about an eighth of its length. Works best filmed from behind the
+            bowler or the batter, with the camera still.
+          </p>
+        </>
+      )}
+      {motion.status === "error" ? <p className="mt-3 text-sm text-risk">{motion.error}</p> : null}
+    </Panel>
   );
 }

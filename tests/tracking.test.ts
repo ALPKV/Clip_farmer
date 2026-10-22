@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { detect, defaultDetectOptions, defaultTrackOptions, findBounce, track, type Gray, type TrackPoint } from "../lib/tracking/core.ts";
-import { detectHits } from "../lib/tracking/hits.ts";
+import { combineDeliveries, motionPeaks } from "../lib/tracking/deliveries.ts";
+import { findImpacts, groupDeliveries, refineContact } from "../lib/tracking/hits.ts";
 import { CREASE_TO_CREASE_M, DEFAULT_SETUP, lengthM, lineCm, speedKmh } from "../lib/tracking/metrics.ts";
 
 test("speed is distance over release-to-contact time", () => {
@@ -61,16 +62,40 @@ test("tracks a synthetic ball with a bounce and finds the bounce", () => {
   assert.ok(Math.abs(b.t - times[bounceAt]) <= 1.01 / 60, `bounce at ${b.t}`);
 });
 
-test("finds bat contacts in audio and pins them to the transient", () => {
-  const sr = 8000;
-  const pcm = new Float32Array(sr * 10);
-  for (let k = 0; k < pcm.length; k++) pcm[k] = (Math.sin(k * 0.3) * 0.01);
-  for (const t of [2.0, 6.5]) {
+test("finds every shot, even two seconds apart, and folds the net thud into its shot", async () => {
+  const sr = 16000;
+  const pcm = new Float32Array(sr * 8);
+  let seed = 7;
+  const noise = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648) * 2 - 1;
+  for (let k = 0; k < pcm.length; k++) pcm[k] = noise() * 0.003;
+  const crack = (t: number, amp: number) => {
     const at = Math.round(t * sr);
-    for (let k = 0; k < 400; k++) pcm[at + k] = (k % 2 ? -1 : 1) * 0.8 * Math.exp(-k / 120);
+    for (let k = 0; k < 400; k++) pcm[at + k] += noise() * amp * Math.exp(-k / 60);
+  };
+  const thud = (t: number) => {
+    const at = Math.round(t * sr);
+    for (let k = 0; k < 2000; k++) pcm[at + k] += Math.sin((2 * Math.PI * 180 * k) / sr) * 0.5 * Math.exp(-k / 600);
+  };
+  crack(2.0, 0.8);
+  thud(2.9); // ball into the net
+  crack(4.0, 0.2); // a softer shot straight after
+  const sounds = groupDeliveries(await findImpacts(pcm, sr)).filter((d) => d.rel > -25);
+  assert.equal(sounds.length, 2, JSON.stringify(sounds));
+  const contacts = sounds.map((d) => refineContact(pcm, sr, d.contact));
+  assert.ok(Math.abs(contacts[0] - 2.0) < 0.01, `first at ${contacts[0]}`);
+  assert.ok(Math.abs(contacts[1] - 4.0) < 0.01, `second at ${contacts[1]}`);
+});
+
+test("adds balls with no bat sound from bowling actions", () => {
+  const t: number[] = [];
+  const m: number[] = [];
+  for (let k = 0; k < 200; k++) {
+    t.push(k / 10);
+    m.push(0.01 + (Math.abs(k / 10 - 5) < 0.3 || Math.abs(k / 10 - 12) < 0.3 ? 0.15 : 0));
   }
-  const hits = detectHits(pcm, sr, 0.15, 3);
-  assert.equal(hits.length, 2);
-  assert.ok(Math.abs(hits[0].time - 2.0) < 0.005, `first at ${hits[0].time}`);
-  assert.ok(Math.abs(hits[1].time - 6.5) < 0.005, `second at ${hits[1].time}`);
+  const peaks = motionPeaks({ t, m });
+  assert.deepEqual(peaks.map((p) => Math.round(p.t)), [5, 12]);
+  // The bowler at 5 s is followed by a bat sound; the one at 12 s is not.
+  const out = combineDeliveries([{ contact: 6.0, levelDb: -3, rel: 0 }], peaks, -25);
+  assert.deepEqual(out.map((d) => [d.kind, Math.round(d.t * 10) / 10]), [["bat", 6], ["no-sound", 12.9]]);
 });

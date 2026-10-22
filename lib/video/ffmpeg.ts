@@ -89,12 +89,15 @@ function friendly(err: unknown): Error {
   return err instanceof Error ? err : new Error(msg);
 }
 
-/** Mono 8 kHz audio as 32-bit floats, plus the video frame rate FFmpeg reports. */
+/**
+ * Mono 16 kHz audio as 16-bit integers (enough for the 1.5–7.5 kHz click of bat on ball, at half the
+ * memory of floats: about 2 MB a minute), plus the video frame rate FFmpeg reports.
+ */
 export async function extractAudio(
   file: File,
   onProgress?: (fraction: number) => void,
-): Promise<{ pcm: Float32Array; sampleRate: number; fps: number | null }> {
-  const sampleRate = 8000;
+): Promise<{ pcm: Int16Array; sampleRate: number; fps: number | null }> {
+  const sampleRate = 16000;
   return withFile(file, async (ff, path) => {
     const handler = ({ progress }: { progress: number }) => onProgress?.(Math.max(0, Math.min(1, progress)));
     let fps: number | null = null;
@@ -105,13 +108,13 @@ export async function extractAudio(
     ff.on("progress", handler);
     ff.on("log", logs);
     try {
-      const code = await ff.exec(["-i", path, "-vn", "-ac", "1", "-ar", String(sampleRate), "-f", "f32le", "/audio.pcm"]);
+      const code = await ff.exec(["-i", path, "-vn", "-ac", "1", "-ar", String(sampleRate), "-f", "s16le", "/audio.pcm"]);
       if (code !== 0) throw new Error("This video has no readable audio track.");
       const data = (await ff.readFile("/audio.pcm")) as Uint8Array;
       await ff.deleteFile("/audio.pcm");
       const copy = new Uint8Array(data.byteLength);
       copy.set(data);
-      return { pcm: new Float32Array(copy.buffer), sampleRate, fps };
+      return { pcm: new Int16Array(copy.buffer), sampleRate, fps };
     } finally {
       ff.off("progress", handler);
       ff.off("log", logs);

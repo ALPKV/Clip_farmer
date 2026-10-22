@@ -195,14 +195,19 @@ export function estimateBytes(fileSize: number, duration: number, clipSeconds: n
   return precise ? Math.min(rate, 2.5e6) * clipSeconds : rate * (clipSeconds + clipCount);
 }
 
+/** Most parts a highlights video is split into. */
+export const MAX_PARTS = 10;
+
 /**
- * How big one part of a highlights video can be on this device. Making a part briefly needs about
- * five times its size (the cut pieces, the engine's copy, the copy handed back and the saved file),
- * and a browser tab gets roughly 1–2 GB on a computer and far less on a phone.
+ * How big one part of a highlights video should be on this device. Making a part briefly needs a few
+ * times its size (the cut pieces, the engine's copy, the copy handed back and the saved file), so
+ * parts start small; for a long session they grow, up to a limit, to stay within MAX_PARTS. A part
+ * that still runs out of memory is remade smaller (see Highlights).
  */
-export function reelBudget(): number {
+export function reelBudget(estimate: number): number {
   const touch = typeof window !== "undefined" && navigator.maxTouchPoints > 0 && matchMedia("(pointer: coarse)").matches;
-  return touch ? 100e6 : 250e6;
+  const [small, ceiling] = touch ? [100e6, 300e6] : [250e6, 750e6];
+  return Math.min(ceiling, Math.max(small, (estimate / MAX_PARTS) * 1.1));
 }
 
 export function isOutOfMemory(err: unknown): boolean {

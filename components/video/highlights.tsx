@@ -10,6 +10,7 @@ import {
   exportReel,
   isApple,
   isOutOfMemory,
+  MAX_PARTS,
   reelBudget,
   saveToPhotos,
 } from "@/lib/video/ffmpeg";
@@ -86,7 +87,7 @@ export function Highlights() {
   const duration = v.meta?.duration && Number.isFinite(v.meta.duration) ? v.meta.duration : lastEnd + 5;
   const bytes = (c: Clip) => estimateBytes(fileSize, duration, c.end - c.start, 1, precise);
   const estimate = included.reduce((a, c) => a + bytes(c), 0);
-  const budget = reelBudget();
+  const budget = reelBudget(estimate);
   const groups = splitForMemory(included, bytes, budget * scale);
   const seconds = (g: Clip[]) => g.reduce((a, c) => a + (c.end - c.start), 0);
   // Parts left after the current one, at the current part size.
@@ -256,7 +257,13 @@ export function Highlights() {
                       {clock(total)}). Untick any you don&apos;t want.
                     </p>
                     <p className="mt-2 border-l-4 border-gold bg-gold/10 px-3 py-2 text-sm text-ink">
-                      {groups.length > 1 ? (
+                      {groups.length > MAX_PARTS ? (
+                        <>
+                          At about {Math.round(estimate / 1_048_576)} MB this would take <b>{groups.length} parts</b> on this
+                          device, more than the {MAX_PARTS} it can do. Untick clips you don&apos;t need (or pick{" "}
+                          <b>Big hits</b>), or make it on a computer, where parts can be bigger.
+                        </>
+                      ) : groups.length > 1 ? (
                         <>
                           At about {Math.round(estimate / 1_048_576)} MB this comes in <b>{groups.length} parts</b> of up to{" "}
                           {Math.round((budget * scale) / 1e6)} MB, so your device never runs out of memory. Save each part and
@@ -280,7 +287,11 @@ export function Highlights() {
                       </span>
                     </label>
                   </div>
-                  <Button tone="gold" disabled={busy != null || included.length === 0} onClick={() => buildReel(0, 0)}>
+                  <Button
+                    tone="gold"
+                    disabled={busy != null || included.length === 0 || groups.length > MAX_PARTS}
+                    onClick={() => buildReel(0, 0)}
+                  >
                     {busy === "reel"
                       ? building && building.of > 1
                         ? `Part ${building.part + 1} of ${building.of} · ${Math.round(reelProgress * 100)}%`

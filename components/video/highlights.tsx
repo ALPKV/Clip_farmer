@@ -612,7 +612,7 @@ function Slider({
 /** The optional bowling-action scan: finds misses, leaves and bowled balls that made no bat sound. */
 /** Status of the bowling scan, which runs by itself after the sound is read. */
 function SilentBalls() {
-  const { motion, scanForSilentBalls, clips, settings, meta } = useVideo();
+  const { motion, scanForSilentBalls, restartScan, clips, settings, meta } = useVideo();
   const silent = clips.filter((c) => c.kind === "no-sound").length;
   const seenSec = (motion.covered ?? []).reduce((a, [x, y]) => a + (y - x), 0);
   // Against what the scan was asked to watch: the stretches before each bat sound, or the whole video.
@@ -631,9 +631,14 @@ function SilentBalls() {
           {motion.detail ? <p className="text-xs text-mute">{motion.detail}…</p> : null}
           {motion.slow ? (
             <p className="text-sm text-warn">
-              Slow mode: this browser wouldn&apos;t play the video in the background, so Flipper is reading it frame by
-              frame. It will finish, just slowly. Next time, turn off Low Power Mode and keep this page on screen.
+              Slow mode: this browser wouldn&apos;t play the video by itself, so Flipper is reading it frame by frame.
+              A tap usually lets it play, which is much faster.
             </p>
+          ) : null}
+          {motion.slow ? (
+            <Button size="sm" tone="gold" onClick={restartScan}>
+              Speed it up
+            </Button>
           ) : null}
           <Meter value={motion.progress} max={1} />
         </div>

@@ -97,6 +97,7 @@ type Ctx = {
   /** The scan for bowling actions, which finds balls that made no bat sound. */
   motion: MotionState;
   scanForSilentBalls: () => void;
+  restartScan: () => void;
   /** Watch the whole video, for balls with no bat sound. */
   scanWholeVideo: () => void;
   settings: ClipSettings;
@@ -179,6 +180,7 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
 
   // Ticking "Add balls with no bat sound" mid-scan asks for a whole-video scan once this one ends.
   const wantFull = useRef(false);
+  const scanId = useRef(0);
   // The loudness setting, for scans started from callbacks.
   const thresholdRef = useRef(DEFAULT_SETTINGS.threshold);
   useEffect(() => {
@@ -197,16 +199,19 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
       ? undefined
       : (snd ?? []).filter((d) => d.rel > thresholdDb).map((d): [number, number] => [d.contact - 3.2, d.contact + 0.3]);
     const planned = spans ? coveredLength(spans) : undefined;
+    // A newer scan (Speed it up, Check again) or a new video makes this one stop.
+    const id = ++scanId.current;
+    const live = () => token === loadToken.current && id === scanId.current;
     setMotion({ status: "running", progress: 0, error: null, peaks: null, full, planned });
     scanMotion(
       src,
-      (p, slow) => token === loadToken.current && setMotion((m) => ({ ...m, progress: p, slow })),
-      () => token !== loadToken.current,
+      (p, slow) => live() && setMotion((m) => ({ ...m, progress: p, slow })),
+      () => !live(),
       spans,
-      (detail) => token === loadToken.current && setMotion((m) => ({ ...m, detail })),
+      (detail) => live() && setMotion((m) => ({ ...m, detail })),
     )
       .then((series) => {
-        if (token !== loadToken.current) return;
+        if (!live()) return;
         setMotion({ status: "done", progress: 1, error: null, peaks: motionPeaks(series), covered: coveredSpans(series), full, planned });
         if (!full && wantFull.current) {
           wantFull.current = false;
@@ -214,7 +219,7 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
         }
       })
       .catch((err: Error) => {
-        if (token !== loadToken.current) return;
+        if (!live()) return;
         if (err.message === NEEDS_TAP) {
           setMotion({
             status: "error",
@@ -294,6 +299,11 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
   const scanForSilentBalls = useCallback(() => {
     if (url && motion.status !== "running") runScan(url, loadToken.current, !!motion.full, sounds, settings.threshold);
   }, [url, motion.status, motion.full, sounds, settings.threshold, runScan]);
+
+  /** Restarts a running check from a tap, which lets a phone that blocked playback play fast. */
+  const restartScan = useCallback(() => {
+    if (url) runScan(url, loadToken.current, !!motion.full, sounds, settings.threshold);
+  }, [url, motion.full, sounds, settings.threshold, runScan]);
 
   const scanWholeVideo = useCallback(() => {
     if (!url || motion.full) return;
@@ -421,6 +431,7 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
     audio,
     motion,
     scanForSilentBalls,
+    restartScan,
     scanWholeVideo,
     settings,
     setSettings,

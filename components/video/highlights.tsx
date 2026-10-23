@@ -18,7 +18,7 @@ import {
 import { Button, Empty, Meter, Panel, Stat, Tag } from "../ui";
 import { Stage } from "./stage";
 import { FileBar, VideoDrop, clock } from "./video-drop";
-import { PRESETS, useVideo, type Clip, type PresetKey } from "./video-context";
+import { useVideo, type Clip } from "./video-context";
 
 /** One part of the highlights: clips [from, to) of the ticked clips. */
 type Reel = { url: string; blob: Blob; clips: number; seconds: number; part: number; from: number; to: number };
@@ -47,7 +47,6 @@ export function Highlights() {
   const [error, setError] = useState<string | null>(null);
   const [reelProgress, setReelProgress] = useState(0);
   const [skip, setSkip] = useState<Set<string>>(new Set());
-  const [precise, setPrecise] = useState(false);
   const [reel, setReel] = useState<Reel | null>(null);
   // Shrinks the parts after a part runs out of memory anyway, for the rest of this video.
   const [scale, setScale] = useState(1);
@@ -101,7 +100,7 @@ export function Highlights() {
   // If the browser can't tell the video's length, the last clip is close to the end of the session.
   const lastEnd = v.clips.reduce((a, c) => Math.max(a, c.end), 0);
   const duration = v.meta?.duration && Number.isFinite(v.meta.duration) ? v.meta.duration : lastEnd + 5;
-  const bytes = (c: Clip) => estimateBytes(fileSize, duration, c.end - c.start, 1, precise);
+  const bytes = (c: Clip) => estimateBytes(fileSize, duration, c.end - c.start, 1, false);
   const estimate = included.reduce((a, c) => a + bytes(c), 0);
   const budget = reelBudget(estimate, bigParts);
   const groups = splitForMemory(included, bytes, budget * scale);
@@ -136,7 +135,7 @@ export function Highlights() {
         startedAt.current = performance.now();
         setReelProgress(0);
         try {
-          const blob = await exportReel(v.file!, group, setReelProgress, { precise });
+          const blob = await exportReel(v.file!, group, setReelProgress);
           setReel({
             url: URL.createObjectURL(blob),
             blob,
@@ -218,11 +217,7 @@ export function Highlights() {
       <div className="grid gap-px bg-line sm:grid-cols-3">
         <Stat label="Clips found" value={v.clips.length} note={`${included.length} in the highlights video`} />
         <Stat label="Highlights length" value={clock(total)} />
-        <Stat
-          label="Detection"
-          value={PRESETS[v.settings.preset].label}
-          note={v.motion.status === "done" ? "Bat sounds and bowling actions" : "From bat sounds"}
-        />
+        <Stat label="Sensitivity" value={`${v.settings.threshold} dB`} note={`Skips ${v.settings.gap.toFixed(1)} s after each clip`} />
       </div>
 
       <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
@@ -298,19 +293,7 @@ export function Highlights() {
                         </span>
                       </label>
                     ) : null}
-                    {precise && included.length > 20 ? (
-                      <p className="mt-2 text-sm text-warn">
-                        Exact cuts re-encode every clip on this device, which can take several minutes for {included.length} clips.
-                        Untick it for a much faster video.
-                      </p>
-                    ) : null}
-                    <label className="mt-2 flex items-start gap-2 text-sm">
-                      <input type="checkbox" className="mt-1" checked={precise} onChange={(e) => setPrecise(e.target.checked)} />
-                      <span>
-                        <b>Exact cuts</b>: every clip starts on the exact frame, and the file is smaller. Slower (re-encodes,
-                        1080p max). Without it, clips can start up to a second early, but it takes seconds.
-                      </span>
-                    </label>
+
                   </div>
                   <Button
                     tone="gold"
@@ -420,8 +403,6 @@ export function Highlights() {
                                 <Tag>Bat</Tag>
                                 <span className="w-14"><Meter value={Math.max(0, (c.level ?? -40) + 40)} max={40} tone="gold" /></span>
                               </span>
-                            ) : c.kind === "no-sound" ? (
-                              <Tag tone="gold">No bat sound</Tag>
                             ) : (
                               <Tag tone="mute">Manual</Tag>
                             )}
@@ -471,55 +452,17 @@ export function Highlights() {
 
         <aside className="space-y-5">
           <Panel title="Detection">
-            <fieldset>
-              <legend className="label">Preset</legend>
-              <div className="grid grid-cols-2 gap-1.5">
-                {(Object.keys(PRESETS) as PresetKey[]).map((k) => (
-                  <button
-                    key={k}
-                    onClick={() =>
-                      v.setSettings({ ...v.settings, preset: k, threshold: k === "custom" ? v.settings.threshold : PRESETS[k].threshold })
-                    }
-                    className={`border px-2 py-2 text-left text-xs ${
-                      v.settings.preset === k ? "border-navy bg-navy text-white" : "border-line bg-white text-ink hover:border-navy"
-                    }`}
-                  >
-                    <span className="block font-display text-sm font-bold uppercase tracking-wide">{PRESETS[k].label}</span>
-                    <span className={v.settings.preset === k ? "text-white/70" : "text-mute"}>{PRESETS[k].note}</span>
-                  </button>
-                ))}
-              </div>
-            </fieldset>
-            {v.settings.preset === "custom" ? (
-              <Slider label="Quietest shot" value={v.settings.threshold} min={-40} max={-5} step={1} format={(n) => `${n} dB`}
-                onChange={(n) => v.setSettings({ ...v.settings, threshold: n })} />
-            ) : null}
+            <p className="text-sm text-slate">A sound louder than the sensitivity makes a clip. Sounds right after a clip are skipped.</p>
+            <Slider label="Sensitivity" value={v.settings.threshold} min={-40} max={-5} step={1}
+              format={(n) => `${n} dB`} onChange={(n) => v.setSettings({ ...v.settings, threshold: n })} />
+            <p className="mt-1 text-xs text-mute">Lower picks up softer shots (and more noise); higher keeps only big hits.</p>
+            <Slider label="Skip after a clip" value={v.settings.gap} min={1} max={10} step={0.5}
+              format={(n) => `${n.toFixed(1)} s`} onChange={(n) => v.setSettings({ ...v.settings, gap: n })} />
             <Slider label="Lead-in" value={v.settings.leadIn} min={0.5} max={4} step={0.1} format={(n) => `${n.toFixed(1)} s`}
               onChange={(n) => v.setSettings({ ...v.settings, leadIn: n })} />
             <Slider label="Clip length" value={v.settings.length} min={1} max={15} step={0.5} format={(n) => `${n.toFixed(1)} s`}
               onChange={(n) => v.setSettings({ ...v.settings, length: n })} />
-            <p className="mt-4 text-xs text-mute">
-              Every ball gets its own clip, however close together. Clips stop short of the next shot.
-            </p>
-            <label className="mt-4 flex items-start gap-2 text-sm">
-              <input type="checkbox" className="mt-1" checked={v.settings.batOnly} onChange={(e) => v.setSettings({ ...v.settings, batOnly: e.target.checked })} />
-              <span>
-                <b>Bat only</b>: keep a bat sound only if the bowler bowled just before it. Drops talking, throws and
-                other nets.
-              </span>
-            </label>
-            <label className="mt-2 flex items-start gap-2 text-sm">
-              <input type="checkbox" className="mt-1" checked={v.settings.addSilent} onChange={(e) => {
-                  v.setSettings({ ...v.settings, addSilent: e.target.checked });
-                  // Finding balls with no bat sound needs the whole video watched, not just before each sound.
-                  if (e.target.checked) v.scanWholeVideo();
-                }} />
-              <span>
-                <b>Add balls with no bat sound</b>: misses, leaves and bowled. Watches the whole video, so it takes longer.
-              </span>
-            </label>
           </Panel>
-          <SilentBalls />
           <Panel title="Saving videos">
             <p className="text-sm text-slate">
               <b className="text-ink">Save</b> on a clip saves just that clip. <b className="text-ink">Create highlights
@@ -527,7 +470,7 @@ export function Highlights() {
             </p>
             <p className="mt-3 text-sm text-slate">
               Your video stays only in this tab&apos;s memory. It and anything made from it are wiped when you press
-              Change video, sign out or close the tab.
+              Change video or close the tab.
             </p>
             {shareable ? (
               <p className="mt-3 text-sm text-slate">
@@ -610,64 +553,3 @@ function Slider({
 }
 
 /** The optional bowling-action scan: finds misses, leaves and bowled balls that made no bat sound. */
-/** Status of the bowling scan, which runs by itself after the sound is read. */
-function SilentBalls() {
-  const { motion, scanForSilentBalls, restartScan, clips, settings, meta } = useVideo();
-  const silent = clips.filter((c) => c.kind === "no-sound").length;
-  const seenSec = (motion.covered ?? []).reduce((a, [x, y]) => a + (y - x), 0);
-  // Against what the scan was asked to watch: the stretches before each bat sound, or the whole video.
-  const planned = motion.planned ?? meta?.duration ?? 0;
-  const seen = planned ? Math.min(1, seenSec / planned) : 1;
-  return (
-    <Panel title="Bowler check">
-      <p className="text-sm text-slate">
-        Flipper also watches for the bowler&apos;s action, so a clip is only made when someone actually bowled.
-      </p>
-      {motion.status === "running" ? (
-        <div className="mt-3 space-y-2">
-          <p className="text-sm text-slate">
-            Watching for bowling actions… {Math.round(motion.progress * 100)}%. Until it finishes, every bat sound is shown.
-          </p>
-          {motion.detail ? <p className="text-xs text-mute">{motion.detail}…</p> : null}
-          {motion.slow ? (
-            <p className="text-sm text-warn">
-              Slow mode: this browser wouldn&apos;t play the video by itself, so Flipper is reading it frame by frame.
-              A tap usually lets it play, which is much faster.
-            </p>
-          ) : null}
-          {motion.slow ? (
-            <Button size="sm" tone="gold" onClick={restartScan}>
-              Speed it up
-            </Button>
-          ) : null}
-          <Meter value={motion.progress} max={1} />
-        </div>
-      ) : motion.status === "done" && seen < 0.8 ? (
-        <>
-          <p className="mt-3 text-sm text-warn">
-            The browser only showed part of what it needed to check ({Math.round(seen * 100)}%), usually because Flipper wasn&apos;t on
-            screen. Bat sounds in the parts it couldn&apos;t see are all kept. Keep this page open and on screen, then:
-          </p>
-          <Button className="mt-2" size="sm" tone="navy" onClick={scanForSilentBalls}>Check again</Button>
-        </>
-      ) : motion.status === "done" ? (
-        <p className="mt-3 text-sm text-ink">
-          Done. {settings.batOnly ? "Only bat sounds after a bowling action are kept." : "Bat only is off: every bat sound is kept."}
-          {settings.addSilent ? ` ${silent} ${silent === 1 ? "ball" : "balls"} with no bat sound added.` : ""}
-        </p>
-      ) : motion.status === "error" && motion.needsTap ? (
-        <>
-          <p className="mt-3 text-sm text-warn">{motion.error} Until it runs, every bat sound is shown.</p>
-          <Button className="mt-2" tone="gold" onClick={scanForSilentBalls}>Start the check</Button>
-        </>
-      ) : motion.status === "error" ? (
-        <>
-          <p className="mt-3 text-sm text-risk">{motion.error} Every bat sound is shown instead.</p>
-          <Button className="mt-2" size="sm" tone="navy" onClick={scanForSilentBalls}>Try again</Button>
-        </>
-      ) : (
-        <p className="mt-3 text-sm text-mute">Starts once the sound has been read.</p>
-      )}
-    </Panel>
-  );
-}

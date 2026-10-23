@@ -1,11 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { Delivery } from "@/lib/data";
-import { lengthZone } from "@/lib/domain";
-import { CREASE_TO_CREASE_M, PITCH_M } from "@/lib/tracking/metrics";
-import { TrackFeedback } from "../training-sharing";
-import { FormError, useSend } from "../use-send";
+import { CREASE_TO_CREASE_M, PITCH_M, lengthZone } from "@/lib/tracking/metrics";
 import { Button, Empty, Meter, Panel, Stat, Tag, fmt } from "../ui";
 import { PitchMap } from "./pitch-map";
 import { Stage } from "./stage";
@@ -18,11 +14,9 @@ const MARKS: { key: MarkKey; label: string; help: string }[] = [
   { key: "contact", label: "Contact", help: "Bat on ball. Auto-filled from the loudest sound; check it's the bat." },
 ];
 
-export function BallTracking({ deliveries, today, shareTraining }: { deliveries: Delivery[]; today: string; shareTraining: boolean }) {
+export function BallTracking() {
   const v = useVideo();
-  const { send, busy, error } = useSend();
   const [calibrating, setCalibrating] = useState<number[] | null>(null);
-  const [saved, setSaved] = useState<string | null>(null);
 
   const clip = v.clips.find((c) => c.id === v.selectedId) ?? null;
   const state = clip ? v.analyses[clip.id] : undefined;
@@ -41,24 +35,12 @@ export function BallTracking({ deliveries, today, shareTraining }: { deliveries:
   const playhead = v.playhead;
   const seek = (t: number) => v.seek(t);
 
-  async function save() {
-    if (!clip) return;
-    const ok = await send("POST", "/api/deliveries", {
-      date: today,
-      speed_kmh: m.speed != null ? Math.round(m.speed * 10) / 10 : null,
-      length_m: m.length != null ? Math.round(m.length * 100) / 100 : null,
-      line_cm: m.line != null ? Math.round(m.line) : null,
-      video_name: v.file?.name ?? "",
-      clip_time: clip.contact ?? clip.start,
-      method: `timed over ${v.setup.distanceM.toFixed(2)} m`,
-    });
-    if (ok) setSaved(clip.id);
-  }
-
-  const history = deliveries
-    .filter((d) => d.length_m != null)
-    .slice(0, 60)
-    .map((d) => ({ length: d.length_m!, line: d.line_cm }));
+  // Every delivery tracked in this session (nothing is stored once the page closes).
+  const history = v.clips
+    .filter((c) => c.id !== clip?.id)
+    .map((c) => clipMetrics(v.marks[c.id], v.analyses[c.id]?.result ?? null, v.setup))
+    .filter((x) => x.length != null)
+    .map((x) => ({ length: x.length!, line: x.line }));
   const current = m.length != null ? [{ length: m.length, line: m.line, current: true }] : [];
 
   return (
@@ -109,7 +91,9 @@ export function BallTracking({ deliveries, today, shareTraining }: { deliveries:
             }}
           />
 
-          {state?.status === "error" ? <FormError error={state.error} /> : null}
+          {state?.status === "error" ? (
+            <p role="alert" className="border-l-4 border-risk bg-risk/5 px-3 py-2 text-sm text-risk">{state.error}</p>
+          ) : null}
           {state?.status === "running" ? <Meter value={state.progress} max={1} tone="gold" /> : null}
 
           <div className="grid gap-px bg-line sm:grid-cols-3">
@@ -148,7 +132,6 @@ export function BallTracking({ deliveries, today, shareTraining }: { deliveries:
                     {analysis.fps < 50 ? " Faster frame rates (60–240 fps) give sharper timings." : ""}
                   </p>
                 ) : null}
-                {analysis ? <TrackFeedback key={clip.id} analysis={analysis} share={shareTraining} /> : null}
                 <div className="divide-y divide-line">
                   {MARKS.map(({ key, label, help }) => {
                     const mk = marks?.[key];
@@ -169,13 +152,6 @@ export function BallTracking({ deliveries, today, shareTraining }: { deliveries:
                     );
                   })}
                 </div>
-                <div className="mt-4 flex flex-wrap items-center gap-3">
-                  <Button tone="navy" disabled={busy || (m.speed == null && m.length == null)} onClick={save}>
-                    Save delivery to portfolio
-                  </Button>
-                  {saved === clip.id ? <Tag tone="ok">Saved</Tag> : null}
-                  <FormError error={error} />
-                </div>
               </>
             )}
           </Panel>
@@ -187,7 +163,7 @@ export function BallTracking({ deliveries, today, shareTraining }: { deliveries:
               <PitchMap points={[...history, ...current]} />
             </div>
             <p className="mt-3 text-xs text-slate">
-              Red: this delivery. Navy: saved deliveries. Hollow dots have no line estimate.
+              Red: this delivery. Navy: other deliveries tracked in this video. Hollow dots have no line estimate.
             </p>
           </Panel>
           <Panel title="Camera setup">
@@ -267,47 +243,6 @@ export function BallTracking({ deliveries, today, shareTraining }: { deliveries:
         </aside>
       </div>
 
-      <Panel title="Saved deliveries" flush>
-        {deliveries.length === 0 ? (
-          <div className="p-4"><Empty title="Nothing saved yet">Track a delivery and save it to build your speed and pitch history.</Empty></div>
-        ) : (
-          <DeliveryTable deliveries={deliveries.slice(0, 12)} />
-        )}
-      </Panel>
-    </div>
-  );
-}
-
-function DeliveryTable({ deliveries }: { deliveries: Delivery[] }) {
-  const { send } = useSend();
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="bg-navy text-left font-display text-[0.8rem] uppercase tracking-wider text-white">
-            <th className="px-4 py-2">Date</th>
-            <th className="px-2 py-2">Speed</th>
-            <th className="px-2 py-2">Length</th>
-            <th className="px-2 py-2">Line</th>
-            <th className="px-2 py-2">Video</th>
-            <th className="px-4 py-2" />
-          </tr>
-        </thead>
-        <tbody>
-          {deliveries.map((d, k) => (
-            <tr key={d.id} className={`border-b border-line ${k % 2 ? "bg-paper/60" : ""}`}>
-              <td className="px-4 py-2">{fmt.date(d.date)}</td>
-              <td className="px-2 py-2 font-display text-base font-bold text-navy">{d.speed_kmh != null ? `${d.speed_kmh.toFixed(1)} km/h` : "—"}</td>
-              <td className="px-2 py-2">{d.length_m != null ? `${d.length_m.toFixed(1)} m · ${lengthZone(d.length_m)}` : "—"}</td>
-              <td className="px-2 py-2">{d.line_cm != null ? `${Math.abs(d.line_cm).toFixed(0)} cm ${d.line_cm < 0 ? "L" : "R"}` : "—"}</td>
-              <td className="max-w-[200px] truncate px-2 py-2 text-slate">{d.video_name}</td>
-              <td className="px-4 py-2 text-right">
-                <button className="text-mute hover:text-risk" aria-label="Delete delivery" onClick={() => send("DELETE", `/api/deliveries/${d.id}`)}>×</button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }

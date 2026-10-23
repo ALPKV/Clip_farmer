@@ -1,25 +1,23 @@
 # Flipper
 
-A practice command centre for cricketers, built from the WillowFlow PRD. It grew out of Clip Farmer, an audio-based auto-clipper (the original Streamlit version is in `legacy/`).
+Drop in an unedited net session video and get a clip for every shot, then track the ball. It grew
+out of Clip Farmer, an audio-based auto-clipper (the original Streamlit version is in `legacy/`).
 
 **Live:** https://flipper-cricket.vercel.app
 
 | Tab | What it does |
 | --- | --- |
-| **Command Centre** | This week's load, the three pillars (physical, technical, mental), Optimal status, injury-risk alert, goals, badges |
-| **Planner** | Plan or log open nets, scenario nets, drills, bowling machine, spot bowling, new skills and conditioning, each with a pre-session intent, RPE and reflection. Logs must be made within 2 hours of finishing. |
-| **Calendar** | Month view of work and rest, weekly load chart. A week more than 20% above the previous one is flagged High Injury Risk. |
-| **Matches** | Batting and bowling figures, dismissal and error analysis, trends |
-| **Mindset** | Strengths and weaknesses inventory, intent vs reflection |
-| **Goals** | Season targets that update from your logs (targets are fixed once set), badges |
-| **Fuel** | Carb tracker with daily targets from body weight and day type |
-| **Highlights** | Drop in an unedited net session: every ball gets its own clip, found from the bat sound and, optionally, from the bowler's action (for misses, leaves and bowled balls). Tick the clips you want and join them into one highlights video (fast, or exact frame cuts). See `scripts/deliveries/README.md`. |
-| **Ball Tracking** | Follows the ball through a clip and draws it over the video (toggle on and off). Times speed and length from release, bounce and contact marks. Pitch map. |
-| **Portfolio** | Printable summary for coaches and academies |
+| **Highlights** | A sound louder than the sensitivity makes a clip; sounds within the skip gap after it (3 s by default) are ignored. Talking is filtered out. Untick or remove (Not a shot) any clip, then save clips one by one or join them into one highlights video, made in parts so long sessions don't run out of memory. Save to Photos on phones. |
+| **Ball Tracking** | Follows the ball through a clip and draws it over the video (toggle on and off). Times speed and length from release, bounce and contact marks. Pitch map of the deliveries tracked in the session. |
 
-Videos never leave the browser: audio scanning, clipping and ball tracking run on your own device
-(FFmpeg compiled to WebAssembly, plus a tracker written for this app). Only the numbers you choose to
-save, such as a delivery's speed, are stored on the server.
+Everything runs on your device: there are no accounts, no database and no uploads (FFmpeg compiled to
+WebAssembly, plus a tracker written for this app).
+
+## How shots are found
+
+`lib/tracking/hits.ts`: sudden jumps in the 1.5–7.5 kHz band against the last 3 s of background (so
+it works in a quiet net or a loud hall), talking dropped (a vowel follows a spoken "t" or "k"), then
+the simple rule above. Results on labelled sessions are in `scripts/deliveries/README.md`.
 
 ## How speed is measured (and how accurate it is)
 
@@ -32,53 +30,36 @@ bounce. Line needs the camera behind the stumps and the stumps marked. All are e
 
 ## Run it on your computer
 
-Needs Node.js 22 or newer. No database to install: without `DATABASE_URL` it uses an embedded
-Postgres (PGlite) saved in `.data/`.
+Needs Node.js 22 or newer.
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open http://localhost:3000 and create an account.
+Open http://localhost:3000.
 
 ```bash
-npm test          # unit tests (PRD rules, tracking, speed maths)
+npm test          # unit tests (shot finding, tracking, speed maths)
 npm run lint
 npm run typecheck
 ```
 
-## Put it online for free (Vercel + Neon)
+## Put it online for free
 
-You do this once; after that every push to `main` redeploys automatically.
-
-1. Go to [vercel.com](https://vercel.com), choose **Sign up → Continue with GitHub**, and pick the free **Hobby** plan.
-2. Click **Add New → Project**, find **Flipper**, click **Import**, then **Deploy**. Leave every setting as it is.
-   The first deploy shows an error page saying the database isn't set up. That's expected.
-3. In the project, open **Storage → Create Database → Neon (Serverless Postgres)**, choose the free plan,
-   and connect it to the project for all environments. This adds `DATABASE_URL` for you.
-4. Open **Deployments**, click the **⋯** menu on the latest one and choose **Redeploy**.
-5. Visit your site and create your account. Check `https://<your-site>/api/health` shows `"database":"postgres"`.
-
-Costs: both free tiers are enough for a personal app. Vercel's Hobby plan is for non-commercial use;
-if you start charging users you'll need Vercel Pro. Neon's free tier sleeps when idle, so the first
-request after a quiet spell takes a second or two longer.
+On [vercel.com](https://vercel.com) (free Hobby plan): **Add New → Project**, import **Flipper**,
+**Deploy**. Every push to `main` redeploys. Nothing else to set up.
 
 ## Project layout
 
 | Path | What it is |
 | --- | --- |
-| `app/` | Pages (`(app)/…` signed-in tabs, `(auth)/…` sign-in) and the API (`app/api/…`) |
-| `components/` | UI. `components/video/` is Highlights and Ball Tracking. |
-| `lib/domain.ts` | PRD rules: workload, 20% spike, 2-hour logging window, pillars, badges, carb ranges |
-| `lib/tracking/` | Ball detection and tracking, bounce detection, delivery finding (bat sounds, bowling actions), speed/length/line maths |
-| `lib/video/` | FFmpeg.wasm (audio, clip and reel export), frame capture and the motion scan |
-| `lib/db.ts`, `lib/schema.ts` | Database connection and tables (created automatically) |
+| `app/` | Pages: `(app)/highlights`, `(app)/tracking`, `(legal)/privacy`, `(legal)/terms` |
+| `components/video/` | Highlights, Ball Tracking, the player and clip bar |
+| `lib/tracking/` | Shot finding from sound, ball detection and tracking, bounce, speed/length/line maths |
+| `lib/video/` | FFmpeg.wasm (audio, clips and highlights video) and frame capture |
+| `scripts/` | Evaluation of shot finding and ball-model training |
 | `legacy/` | The original Streamlit version (then called Clip Farmer), kept for reference |
 
-## Security notes
-
-- Passwords are hashed with scrypt; sessions are random tokens stored hashed, in an HTTP-only cookie.
-- State-changing API requests from other sites are refused; sign-in attempts are rate-limited.
-- `config.yaml` (old Streamlit logins) is no longer tracked, but earlier commits of this public
-  repository still contain it. Don't reuse those passwords anywhere.
+`config.yaml` (old Streamlit logins) is no longer tracked, but earlier commits of this public
+repository still contain it. Don't reuse those passwords anywhere.

@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { detect, defaultDetectOptions, defaultTrackOptions, findBounce, track, type Gray, type TrackPoint } from "../lib/tracking/core.ts";
-import { analyzeFrames } from "../lib/tracking/analyze.ts";
-import { clipWindows, combineDeliveries, motionPeaks } from "../lib/tracking/deliveries.ts";
-import { FEATURE_COUNT } from "../lib/tracking/model.ts";
-import { findImpacts, groupDeliveries, isSpeech, refineContact } from "../lib/tracking/hits.ts";
+import { clipWindows } from "../lib/tracking/deliveries.ts";
+import { findImpacts, isSpeech, pickShots, refineContact, type Sound } from "../lib/tracking/hits.ts";
 import { CREASE_TO_CREASE_M, DEFAULT_SETUP, lengthM, lineCm, speedKmh } from "../lib/tracking/metrics.ts";
 
 test("speed is distance over release-to-contact time", () => {
@@ -64,25 +62,13 @@ test("tracks a synthetic ball with a bounce and finds the bounce", () => {
   assert.ok(Math.abs(b.t - times[bounceAt]) <= 1.01 / 60, `bounce at ${b.t}`);
 });
 
-test("collects model features for the tracked path, only when asked", () => {
-  const w = 200;
-  const h = 300;
-  const n = 20;
-  const frames = Array.from({ length: n }, (_, i) => {
-    const g = blank(w, h);
-    dot(g, 20 + i * 8, 60 + i * 9, 3);
-    return g;
-  });
-  const times = frames.map((_, i) => i / 60);
-  assert.equal(analyzeFrames(frames, times, null, { useModel: false }).training, null);
-  const a = analyzeFrames(frames, times, null, { useModel: false, collect: true });
-  assert.ok(a.training && a.training.track.length >= 10, `only ${a.training?.track.length} track samples`);
-  for (const f of a.training!.track) assert.equal(f.length, FEATURE_COUNT);
-});
+/** What the app does after reading the sound: sharp, non-talking sounds at their exact click. */
+async function soundsOf(pcm: Float32Array, sr: number): Promise<Sound[]> {
+  return (await findImpacts(pcm, sr)).filter((e) => e.riseDb > 10 && !isSpeech(e)).map((e) => ({ t: refineContact(pcm, sr, e.t), levelDb: e.levelDb }));
+}
 
-test("finds every shot, even two seconds apart, and folds the net thud into its shot", async () => {
-  const sr = 16000;
-  const pcm = new Float32Array(sr * 8);
+function noisy(seconds: number, sr: number) {
+  const pcm = new Float32Array(sr * seconds);
   let seed = 7;
   const noise = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648) * 2 - 1;
   for (let k = 0; k < pcm.length; k++) pcm[k] = noise() * 0.003;
@@ -90,73 +76,44 @@ test("finds every shot, even two seconds apart, and folds the net thud into its 
     const at = Math.round(t * sr);
     for (let k = 0; k < 400; k++) pcm[at + k] += noise() * amp * Math.exp(-k / 60);
   };
-  const thud = (t: number) => {
-    const at = Math.round(t * sr);
-    for (let k = 0; k < 2000; k++) pcm[at + k] += Math.sin((2 * Math.PI * 180 * k) / sr) * 0.5 * Math.exp(-k / 600);
-  };
+  return { pcm, crack, noise };
+}
+
+test("a sound over the threshold makes a clip; sounds within the gap after it are skipped", async () => {
+  const sr = 16000;
+  const { pcm, crack } = noisy(9, sr);
   crack(2.0, 0.8);
-  thud(2.9); // ball into the net
-  crack(4.0, 0.2); // a softer shot straight after
-  const sounds = groupDeliveries(await findImpacts(pcm, sr)).filter((d) => d.rel > -25);
-  assert.equal(sounds.length, 2, JSON.stringify(sounds));
-  const contacts = sounds.map((d) => refineContact(pcm, sr, d.contact));
-  assert.ok(Math.abs(contacts[0] - 2.0) < 0.01, `first at ${contacts[0]}`);
-  assert.ok(Math.abs(contacts[1] - 4.0) < 0.01, `second at ${contacts[1]}`);
+  crack(3.5, 0.5); // the ball hitting the net 1.5 s later: inside the 3 s gap
+  crack(6.0, 0.3); // the next ball
+  const shots = pickShots(await soundsOf(pcm, sr), -25, 3);
+  assert.deepEqual(shots.map((s) => Math.round(s.t * 10) / 10), [2, 6]);
+  // A shorter gap keeps the second sound too.
+  assert.equal(pickShots(await soundsOf(pcm, sr), -25, 1).length, 3);
 });
 
 test("ignores talking: a 't' or 'k' followed by a vowel is not a shot", async () => {
   const sr = 16000;
-  const pcm = new Float32Array(sr * 6);
-  let seed = 3;
-  const noise = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648) * 2 - 1;
-  for (let k = 0; k < pcm.length; k++) pcm[k] = noise() * 0.003;
+  const { pcm, crack, noise } = noisy(6, sr);
   // A spoken "ta": a short click, then 250 ms of a vowel at 140 Hz (harmonics shaped like a voice).
   const syl = Math.round(2.0 * sr);
   for (let k = 0; k < 160; k++) pcm[syl + k] += noise() * 0.7 * Math.exp(-k / 50);
   for (let k = 160; k < 160 + 0.25 * sr; k++) {
     let v = 0;
-    for (let hNo = 1; hNo <= 25; hNo++) v += Math.sin((2 * Math.PI * 140 * hNo * k) / sr) / hNo;
+    for (let h = 1; h <= 25; h++) v += Math.sin((2 * Math.PI * 140 * h * k) / sr) / h;
     pcm[syl + k] += 0.25 * v * Math.min(1, (k - 160) / 160);
   }
-  // A real crack later on.
-  const at = Math.round(4.0 * sr);
-  for (let k = 0; k < 400; k++) pcm[at + k] += noise() * 0.8 * Math.exp(-k / 60);
+  crack(4.0, 0.8);
   const impacts = await findImpacts(pcm, sr);
   assert.ok(impacts.some((e) => Math.abs(e.t - 2.0) < 0.05 && isSpeech(e)), "the syllable should be flagged as speech");
-  const sounds = groupDeliveries(impacts).filter((d) => d.rel > -25);
-  assert.deepEqual(sounds.map((d) => Math.round(d.contact)), [4]);
-});
-
-test("adds balls with no bat sound from bowling actions", () => {
-  const t: number[] = [];
-  const m: number[] = [];
-  for (let k = 0; k < 200; k++) {
-    t.push(k / 10);
-    m.push(0.01 + (Math.abs(k / 10 - 5) < 0.3 || Math.abs(k / 10 - 12) < 0.3 ? 0.15 : 0));
-  }
-  const peaks = motionPeaks({ t, m });
-  assert.deepEqual(peaks.map((p) => Math.round(p.t)), [5, 12]);
-  // The bowler at 5 s is followed by a bat sound; the one at 12 s is not.
-  const out = combineDeliveries([{ contact: 6.0, levelDb: -3, rel: 0 }], peaks, -25, { addSilent: true });
-  assert.deepEqual(out.map((d) => [d.kind, Math.round(d.t * 10) / 10]), [["bat", 6], ["no-sound", 12.9]]);
-  // Bat only: a sound with no bowler before it (talk, a throw back) is dropped.
-  const sounds = [6.0, 9.5].map((contact) => ({ contact, levelDb: -3, rel: 0 }));
-  assert.deepEqual(combineDeliveries(sounds, peaks, -25, { batOnly: true }).map((d) => d.t), [6]);
-  assert.deepEqual(combineDeliveries(sounds, peaks, -25).map((d) => d.t), [6, 9.5]);
+  assert.deepEqual(pickShots(await soundsOf(pcm, sr), -25, 3).map((s) => Math.round(s.t)), [4]);
 });
 
 test("balls close together each keep their own clip", () => {
-  const ball = (t: number) => ({ t, kind: "bat" as const, rel: 0 });
-  // Three deliveries 1.5 s apart (two nets side by side), with the usual 1 s lead-in and 2.5 s clip.
+  const ball = (t: number) => ({ t, rel: 0 });
   const w = clipWindows([ball(10), ball(11.5), ball(13)], 1, 2.5);
   assert.equal(w.length, 3);
   for (const { delivery, start, end } of w) assert.ok(start < delivery.t && end > delivery.t, `clip ${start}-${end} misses ${delivery.t}`);
   for (let k = 1; k < w.length; k++) assert.ok(w[k].start >= w[k - 1].end, "clips overlap");
   // Removing the middle one (Not a shot) gives its neighbours their full length back.
-  const two = clipWindows([ball(10), ball(13)], 1, 2.5);
-  assert.deepEqual(two.map((c) => [c.start, c.end]), [[9, 11.5], [12, 14.5]]);
-  // Bat only keeps every ball that has a bowler before it, however close.
-  const peaks = [{ t: 9, height: 0.2 }, { t: 10.6, height: 0.2 }, { t: 12.1, height: 0.2 }];
-  const sounds = [10, 11.5, 13].map((contact) => ({ contact, levelDb: -3, rel: 0 }));
-  assert.equal(combineDeliveries(sounds, peaks, -25, { batOnly: true }).length, 3);
+  assert.deepEqual(clipWindows([ball(10), ball(13)], 1, 2.5).map((c) => [c.start, c.end]), [[9, 11.5], [12, 14.5]]);
 });

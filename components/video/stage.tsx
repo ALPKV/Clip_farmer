@@ -250,8 +250,7 @@ export function Stage({
 }
 
 /**
- * The whole session as a bar with every clip marked on it (gold: bat sound, outline: no bat sound,
- * grey: added by hand). Tap a mark to jump to that clip; tap anywhere else to jump there.
+ * The whole session as a bar with every clip marked on it (gold: bat sound, grey: added by hand). Tap a mark to jump to that clip; tap anywhere else to jump there.
  */
 function ClipBar({
   duration,
@@ -286,7 +285,7 @@ function ClipBar({
       >
         {clips.map((c, k) => {
           const sel = c.id === selectedId;
-          const tone = c.kind === "bat" ? "bg-gold border-gold" : c.kind === "no-sound" ? "bg-transparent border-gold" : "bg-white/50 border-white/50";
+          const tone = c.kind === "bat" ? "bg-gold border-gold" : "bg-white/50 border-white/50";
           return (
             <button
               key={c.id}

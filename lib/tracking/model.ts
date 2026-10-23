@@ -11,10 +11,7 @@ import weights from "./ball-model.json" with { type: "json" };
 export type BallModel = { patch: number; mu: number[]; sd: number[]; w: number[]; b: number };
 
 export const ballModel: BallModel = weights;
-/** Tag stored with shared training samples, so they can be matched to the model that chose them. */
-export const MODEL_VERSION = `v${(weights as { version?: number }).version ?? 0}`;
-/** 6 shape and brightness numbers, then the 9×9 patch, then its 9×9 motion. */
-export const FEATURE_COUNT = 6 + 81 + 81;
+
 
 /** Features must match the training script exactly (scripts/ball-model). */
 export function ballFeatures(prev: Gray, cur: Gray, next: Gray, c: Candidate, patchSize = 9): number[] {

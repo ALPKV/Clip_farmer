@@ -1,4 +1,4 @@
-import { LENGTH_ZONES } from "@/lib/domain";
+import { LENGTH_ZONES } from "@/lib/tracking/metrics";
 
 export type PitchPoint = { length: number; line: number | null; current?: boolean; speed?: number | null };
 

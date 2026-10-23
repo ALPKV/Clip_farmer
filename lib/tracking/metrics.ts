@@ -72,3 +72,14 @@ export function lineCm(
   const metres = ((bounceX - midX) / widthPx) * STUMPS_WIDTH_M * (zBounce / zStumps);
   return metres * 100;
 }
+
+/** Where a ball pitched, by distance from the batter's stumps. */
+export const LENGTH_ZONES = [
+  { label: "Yorker", from: 0, to: 2 },
+  { label: "Full", from: 2, to: 6 },
+  { label: "Good", from: 6, to: 8 },
+  { label: "Back of length", from: 8, to: 10 },
+  { label: "Short", from: 10, to: 20.12 },
+] as const;
+
+export const lengthZone = (m: number) => LENGTH_ZONES.find((z) => m >= z.from && m < z.to)?.label ?? "Short";

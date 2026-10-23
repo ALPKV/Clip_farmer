@@ -1,13 +1,10 @@
 /**
- * Finding deliveries from the sound track. A cricket impact (bat on ball, ball on stumps) is a
- * sharp, bright click: high-frequency energy that jumps far above the room's background in a few
- * milliseconds. So instead of a fixed loudness threshold this looks for sudden jumps in the
- * 1.5–7.5 kHz band compared with the previous 3 seconds, which works in a quiet net or a loud hall.
- *
- * One ball makes several sounds (the shot, then the ball hitting the net or a wall), so impacts are
- * grouped into deliveries: the bat sound is the first sharp sound of the group. The next delivery is
- * always kept as its own clip, however soon it comes.
- * Tested against hand-labelled net sessions in scripts/deliveries/README.md.
+ * Finding shots from the sound track. A bat hitting the ball is a sharp, bright click: high-frequency
+ * energy that jumps far above the room's background in a few milliseconds. So instead of a fixed
+ * loudness level this looks for sudden jumps in the 1.5–7.5 kHz band compared with the previous
+ * 3 seconds, which works in a quiet net or a loud hall. Talking is ignored (a "t" or "k" clicks too,
+ * but a vowel follows it). Then the rule is simple: a sound over the threshold makes a clip, and any
+ * sound within the gap after it is skipped.
  */
 
 export type Impact = {
@@ -63,14 +60,8 @@ export const isSpeech = (e: Impact) => e.voice > SPEECH_VOICE && e.voice - e.voi
 export const SPEECH_VOICE = 0.6;
 export const SPEECH_RISE = 0.3;
 
-export type SoundDelivery = {
-  /** Time of the first sharp sound of the group: the bat (or stumps) contact. */
-  contact: number;
-  /** Loudest sound of the group, in dB. */
-  levelDb: number;
-  /** `levelDb` against the session's loud deliveries (90th percentile), in dB; 0 is a big hit. */
-  rel: number;
-};
+/** A candidate shot: an impact that isn't talking, at its exact click. */
+export type Sound = { t: number; levelDb: number };
 
 const N = 512;
 const HOP = 128;
@@ -235,43 +226,26 @@ export async function findImpacts(
   return out;
 }
 
-/** Groups impacts into one entry per ball. */
-export function groupDeliveries(impacts: Impact[]): SoundDelivery[] {
-  const ev = impacts.filter((e) => e.riseDb > 10 && !isSpeech(e));
-  const order = ev.map((_, i) => i).sort((a, b) => ev[b].levelDb - ev[a].levelDb);
-  const used = new Array(ev.length).fill(false);
-  const groups: { contact: number; levelDb: number }[] = [];
-  for (const i of order) {
-    if (used[i]) continue;
-    const p = ev[i];
-    // Up to 1 s before the loudest sound (the shot can be quieter than the ball hitting the net),
-    // everything in the 1.8 s after (the ball reaching the net or being returned), and dull thuds up
-    // to 2.4 s after. No bowler delivers again within 1.8 s, so the next ball always stays separate.
-    const members = ev
-      .map((e, j) => ({ e, j }))
-      .filter(({ e, j }) =>
-        !used[j] &&
-        ((e.t >= p.t - 1 && e.t <= p.t + 1.8) || (e.t > p.t + 1.8 && e.t <= p.t + 2.4 && e.hiLo < p.hiLo - 0.3)),
-      );
-    for (const { j } of members) used[j] = true;
-    const lead = members.filter(({ e }) => e.t <= p.t && e.levelDb >= p.levelDb - 10).map(({ e }) => e);
-    const first = lead.reduce((a, b) => (b.t < a.t ? b : a), p);
-    groups.push({ contact: first.t, levelDb: p.levelDb });
-  }
-  groups.sort((a, b) => a.contact - b.contact);
-  const merged: typeof groups = [];
-  for (const g of groups) {
-    const last = merged[merged.length - 1];
-    if (last && g.contact - last.contact < 0.6) {
-      last.levelDb = Math.max(last.levelDb, g.levelDb);
-      continue;
-    }
-    merged.push({ ...g });
-  }
-  if (merged.length === 0) return [];
-  const levels = merged.map((g) => g.levelDb).sort((a, b) => a - b);
+/**
+ * The shots: every sound within `thresholdDb` of the session's big hits (its 90th-percentile
+ * loudness), skipping anything within `gapSec` after a kept one. Of sounds less than 0.4 s apart the
+ * loudest is kept, so a footstep just before the crack doesn't take its place.
+ */
+export function pickShots(sounds: Sound[], thresholdDb: number, gapSec: number): { t: number; rel: number }[] {
+  if (sounds.length === 0) return [];
+  const levels = sounds.map((s) => s.levelDb).sort((a, b) => a - b);
   const ref = levels[Math.min(levels.length - 1, Math.floor(0.9 * (levels.length - 1) + 0.5))];
-  return merged.map((g) => ({ ...g, rel: g.levelDb - ref }));
+  const loud = sounds.filter((s) => s.levelDb - ref > thresholdDb).sort((a, b) => a.t - b.t);
+  const out: { t: number; rel: number }[] = [];
+  let last = -Infinity;
+  for (let i = 0; i < loud.length; i++) {
+    if (loud[i].t - last < gapSec) continue;
+    let best = loud[i];
+    for (let j = i + 1; j < loud.length && loud[j].t - loud[i].t < 0.4; j++) if (loud[j].levelDb > best.levelDb) best = loud[j];
+    out.push({ t: best.t, rel: best.levelDb - ref });
+    last = best.t;
+  }
+  return out;
 }
 
 /** Time of the largest sample-to-sample jump within ±`window` s: the crack of bat on ball. */

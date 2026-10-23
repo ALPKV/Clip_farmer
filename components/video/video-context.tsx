@@ -2,56 +2,36 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { analyzeFrames, type BallAnalysis } from "@/lib/tracking/analyze";
-import {
-  clipWindows,
-  combineDeliveries,
-  coveredLength,
-  coveredSpans,
-  deliveryId,
-  motionPeaks,
-  type MotionPeak,
-} from "@/lib/tracking/deliveries";
-import { findImpacts, groupDeliveries, refineContact, type SoundDelivery } from "@/lib/tracking/hits";
+import { clipWindows, deliveryId } from "@/lib/tracking/deliveries";
+import { findImpacts, isSpeech, pickShots, refineContact, type Sound } from "@/lib/tracking/hits";
 import { DEFAULT_SETUP, lengthM, lineCm, speedKmh, type Setup } from "@/lib/tracking/metrics";
 import { extractAudio, releaseEngine } from "@/lib/video/ffmpeg";
 import { captureFrames } from "@/lib/video/frames";
-import { NEEDS_TAP, scanMotion } from "@/lib/video/motion";
 
 /**
  * The loaded video and everything derived from it, shared by the Highlights and Ball Tracking
  * tabs so switching tabs keeps your work. Nothing here leaves the browser, and all of it is dropped
- * (and the video engine shut down) when the video is removed, you sign out or the tab closes.
+ * (and the video engine shut down) when the video is removed or the tab closes.
  */
 
-/** How quiet a bat sound can be, in dB below the session's big hits, and still count as a shot. */
-export const PRESETS = {
-  big: { label: "Big hits", threshold: -10, note: "Only the loudest shots" },
-  every: { label: "Every shot", threshold: -25, note: "All bat sounds, soft ones too" },
-  everything: { label: "Everything", threshold: -32, note: "Edges and faint clicks; a few extras" },
-  custom: { label: "Custom", threshold: -25, note: "Set your own threshold" },
-} as const;
-export type PresetKey = keyof typeof PRESETS;
-
 export type ClipSettings = {
-  preset: PresetKey;
+  /** How loud a sound must be to make a clip, in dB below the session's big hits (0 = only the loudest). */
   threshold: number;
+  /** After a clip, sounds within this many seconds are skipped (back-to-back noise from the same ball). */
+  gap: number;
   leadIn: number;
   length: number;
-  /** Keep a bat sound only when the bowler bowled just before it (needs the bowling scan). */
-  batOnly: boolean;
-  /** Also add balls the bowler bowled that made no bat sound. */
-  addSilent: boolean;
 };
 
 export type Clip = {
   id: string;
   start: number;
   end: number;
-  /** Bat (or stumps) contact from the sound; null for balls with no bat sound and manual clips. */
+  /** Bat contact from the sound; null for clips added by hand. */
   contact: number | null;
   /** Sound strength against the session's big hits, in dB. */
   level: number | null;
-  kind: "bat" | "no-sound" | "manual";
+  kind: "bat" | "manual";
   manual: boolean;
 };
 
@@ -68,25 +48,6 @@ export type AnalysisState = {
 export type TrackingSetup = Setup & { stumps: { leftX: number; rightX: number } | null };
 
 type AudioState = { status: "idle" | "loading" | "ready" | "error" | "none"; progress: number; error: string | null };
-type MotionState = {
-  status: "idle" | "running" | "done" | "error";
-  progress: number;
-  error: string | null;
-  peaks: MotionPeak[] | null;
-  /** Using the slow frame-by-frame method because the browser wouldn't play the video. */
-  slow?: boolean;
-  /** Watched the whole video (needed for balls with no bat sound), not just before each bat sound. */
-  full?: boolean;
-  /** Seconds of video the scan was asked to watch. */
-  planned?: number;
-  /** What the scan is doing right now, in words. */
-  detail?: string;
-  /** The browser wouldn't open the video by itself: the check must be started with a tap. */
-  needsTap?: boolean;
-  /** Stretches of video the scan saw clearly; Bat only only drops sounds inside them. */
-  covered?: [number, number][];
-};
-
 type Ctx = {
   file: File | null;
   url: string | null;
@@ -94,12 +55,6 @@ type Ctx = {
   loadFile: (f: File) => void;
   clearFile: () => void;
   audio: AudioState;
-  /** The scan for bowling actions, which finds balls that made no bat sound. */
-  motion: MotionState;
-  scanForSilentBalls: () => void;
-  restartScan: () => void;
-  /** Watch the whole video, for balls with no bat sound. */
-  scanWholeVideo: () => void;
   settings: ClipSettings;
   setSettings: (s: ClipSettings) => void;
   clips: Clip[];
@@ -131,8 +86,7 @@ export function useVideo(): Ctx {
   return v;
 }
 
-const DEFAULT_SETTINGS: ClipSettings = { preset: "every", threshold: -25, leadIn: 1, length: 2.5, batOnly: true, addSilent: false };
-const NO_MOTION: MotionState = { status: "idle", progress: 0, error: null, peaks: null };
+const DEFAULT_SETTINGS: ClipSettings = { threshold: -25, gap: 3, leadIn: 1, length: 2.5 };
 const DEFAULT_TRACKING: TrackingSetup = { ...DEFAULT_SETUP, stumps: null };
 
 const emptyMarks = (): Marks => ({
@@ -154,9 +108,8 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
   const [url, setUrl] = useState<string | null>(null);
   const [meta, setMeta] = useState<Ctx["meta"]>(null);
   const [audio, setAudio] = useState<AudioState>({ status: "idle", progress: 0, error: null });
-  const [sounds, setSounds] = useState<SoundDelivery[] | null>(null);
+  const [sounds, setSounds] = useState<Sound[] | null>(null);
   const [fps, setFps] = useState<number | null>(null);
-  const [motion, setMotion] = useState<MotionState>(NO_MOTION);
   const [settings, setSettings] = useState<ClipSettings>(DEFAULT_SETTINGS);
   const [manual, setManual] = useState<Clip[]>([]);
   const [removed, setRemoved] = useState<Set<string>>(new Set());
@@ -178,60 +131,6 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   }, []);
 
-  // Ticking "Add balls with no bat sound" mid-scan asks for a whole-video scan once this one ends.
-  const wantFull = useRef(false);
-  const scanId = useRef(0);
-  // The loudness setting, for scans started from callbacks.
-  const thresholdRef = useRef(DEFAULT_SETTINGS.threshold);
-  useEffect(() => {
-    thresholdRef.current = settings.threshold;
-  }, [settings.threshold]);
-
-  /**
-   * Watches for bowling actions (see lib/video/motion.ts). Starts by itself once the sound is read.
-   * Bat only needs just the 3 s before each bat sound (any loudness the slider can reach), so by
-   * default only those stretches are watched; `full` watches the whole video.
-   */
-  const runScan = useCallback((src: string, token: number, full: boolean, snd: SoundDelivery[] | null, thresholdDb: number) => {
-    // Only sounds loud enough to become clips need checking; lowering the slider later shows the new
-    // ones unchecked (kept) until Check again.
-    const spans = full
-      ? undefined
-      : (snd ?? []).filter((d) => d.rel > thresholdDb).map((d): [number, number] => [d.contact - 3.2, d.contact + 0.3]);
-    const planned = spans ? coveredLength(spans) : undefined;
-    // A newer scan (Speed it up, Check again) or a new video makes this one stop.
-    const id = ++scanId.current;
-    const live = () => token === loadToken.current && id === scanId.current;
-    setMotion({ status: "running", progress: 0, error: null, peaks: null, full, planned });
-    scanMotion(
-      src,
-      (p, slow) => live() && setMotion((m) => ({ ...m, progress: p, slow })),
-      () => !live(),
-      spans,
-      (detail) => live() && setMotion((m) => ({ ...m, detail })),
-    )
-      .then((series) => {
-        if (!live()) return;
-        setMotion({ status: "done", progress: 1, error: null, peaks: motionPeaks(series), covered: coveredSpans(series), full, planned });
-        if (!full && wantFull.current) {
-          wantFull.current = false;
-          runScan(src, token, true, snd, thresholdDb);
-        }
-      })
-      .catch((err: Error) => {
-        if (!live()) return;
-        if (err.message === NEEDS_TAP) {
-          setMotion({
-            status: "error",
-            progress: 0,
-            peaks: null,
-            needsTap: true,
-            error: "Your phone didn't let Flipper open the video in the background (often because of Low Power Mode).",
-          });
-        } else setMotion({ status: "error", progress: 0, error: err.message, peaks: null });
-      });
-  }, []);
-
   const clearFile = useCallback(() => {
     loadToken.current++;
     setFile(null);
@@ -242,7 +141,6 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
     setMeta(null);
     setSounds(null);
     setFps(null);
-    setMotion(NO_MOTION);
     setAudio({ status: "idle", progress: 0, error: null });
     setManual([]);
     setRemoved(new Set());
@@ -277,11 +175,15 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
           if (token !== loadToken.current) return;
           const impacts = await findImpacts(res.pcm, res.sampleRate, (p) => progress(0.6 + p * 0.4));
           if (token !== loadToken.current) return;
-          const grouped = groupDeliveries(impacts).map((d) => ({ ...d, contact: refineContact(res.pcm, res.sampleRate, d.contact) }));
-          setSounds(grouped);
+          // Every sharp sound that isn't talking, pinned to its exact click. Which of them become
+          // clips depends on the sliders, so that part runs instantly when they move.
+          setSounds(
+            impacts
+              .filter((e) => e.riseDb > 10 && !isSpeech(e))
+              .map((e) => ({ t: refineContact(res.pcm, res.sampleRate, e.t), levelDb: e.levelDb })),
+          );
           setFps(res.fps);
           setAudio({ status: "ready", progress: 1, error: null });
-          runScan(u, token, false, grouped, thresholdRef.current);
         })
         .catch((err: Error) => {
           if (token !== loadToken.current) return;
@@ -292,35 +194,12 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
           });
         });
     },
-    [clearFile, runScan],
+    [clearFile],
   );
 
-  /** Retry for the bowling scan if it failed; it normally starts by itself. */
-  const scanForSilentBalls = useCallback(() => {
-    if (url && motion.status !== "running") runScan(url, loadToken.current, !!motion.full, sounds, settings.threshold);
-  }, [url, motion.status, motion.full, sounds, settings.threshold, runScan]);
-
-  /** Restarts a running check from a tap, which lets a phone that blocked playback play fast. */
-  const restartScan = useCallback(() => {
-    if (url) runScan(url, loadToken.current, !!motion.full, sounds, settings.threshold);
-  }, [url, motion.full, sounds, settings.threshold, runScan]);
-
-  const scanWholeVideo = useCallback(() => {
-    if (!url || motion.full) return;
-    if (motion.status === "running") wantFull.current = true;
-    else runScan(url, loadToken.current, true, sounds, settings.threshold);
-  }, [url, motion.status, motion.full, sounds, settings.threshold, runScan]);
-
   const deliveries = useMemo(
-    () =>
-      sounds
-        ? combineDeliveries(sounds, motion.peaks, settings.threshold, {
-            batOnly: settings.batOnly,
-            addSilent: settings.addSilent,
-            covered: motion.covered,
-          })
-        : [],
-    [sounds, motion.peaks, motion.covered, settings.threshold, settings.batOnly, settings.addSilent],
+    () => (sounds ? pickShots(sounds, settings.threshold, settings.gap) : []),
+    [sounds, settings.threshold, settings.gap],
   );
 
   const clips: Clip[] = useMemo(() => {
@@ -330,9 +209,9 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
       id: deliveryId(d),
       start,
       end,
-      contact: d.kind === "bat" ? d.t : null,
+      contact: d.t,
       level: d.rel,
-      kind: d.kind,
+      kind: "bat",
       manual: false,
     }));
     return [...auto, ...manual].sort((a, b) => a.start - b.start);
@@ -388,7 +267,7 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
           fps,
         );
         if (frames.length < 6) throw new Error("Too few frames in this clip to track the ball.");
-        const result = analyzeFrames(frames, times, clip.contact, { collect: true });
+        const result = analyzeFrames(frames, times, clip.contact);
         setAnalyses((a) => ({ ...a, [id]: { status: "done", progress: 1, result, error: null } }));
         setMarks((all) => {
           const cur = all[id] ?? emptyMarks();
@@ -429,10 +308,6 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
     loadFile,
     clearFile,
     audio,
-    motion,
-    scanForSilentBalls,
-    restartScan,
-    scanWholeVideo,
     settings,
     setSettings,
     clips,

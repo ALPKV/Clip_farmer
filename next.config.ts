@@ -8,11 +8,13 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  // PGlite (local development database) ships its own WebAssembly; keep it out of the bundle.
-  serverExternalPackages: ["@electric-sql/pglite"],
-  // The Highlights tab used to be called Clip Farmer.
+  // Old addresses from when Flipper had accounts and more tabs.
   async redirects() {
-    return [{ source: "/clips", destination: "/highlights", permanent: true }];
+    return ["/clips", "/login", "/signup", "/dashboard", "/profile"].map((source) => ({
+      source,
+      destination: "/highlights",
+      permanent: false,
+    }));
   },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];

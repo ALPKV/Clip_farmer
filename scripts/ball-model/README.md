@@ -39,11 +39,3 @@ Needs Node 22+, Python 3 with `numpy` and `opencv-python`, and an `ffmpeg` binar
 
 Best footage for future training: unedited sessions on a tripod behind the bowler's stumps,
 60 fps or more, with the release and the batter in view.
-
-## Samples shared by players
-
-Players can opt in (Profile → Help train ball tracking). After tracking a delivery they answer "Is
-the yellow path the ball?", and the 168 features of each tracked spot (and, for a yes, up to 80 other
-moving spots as "not ball") are stored in `training_samples`. No video, frames, file names or times.
-Export them with `scripts/ball-model/export-shared.mts` and add them to step 4 above. Check new
-weights on held-out videos before shipping, as usual: a few players' answers can be wrong.

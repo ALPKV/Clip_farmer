@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import { Barlow, Barlow_Condensed } from "next/font/google";
-import { TimezoneCookie } from "@/components/timezone-cookie";
 import "./globals.css";
 
 const barlow = Barlow({
@@ -18,7 +17,7 @@ const barlowCondensed = Barlow_Condensed({
 export const metadata: Metadata = {
   title: { default: "Flipper", template: "%s · Flipper" },
   description:
-    "Flipper is a practice command centre for cricketers: plan and log sessions, manage workload, track goals, and turn net videos into clips with ball tracking.",
+    "Flipper turns a net session video into a clip for every shot, and tracks the ball. Everything runs on your device.",
 };
 
 export const viewport: Viewport = { themeColor: "#00175f" };
@@ -27,7 +26,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${barlow.variable} ${barlowCondensed.variable}`}>
       <body className="min-h-screen antialiased">
-        <TimezoneCookie />
         {children}
       </body>
     </html>

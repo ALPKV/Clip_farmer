@@ -13,15 +13,10 @@
     "test": "node --test --experimental-strip-types tests/*.test.ts"
   },
   "dependencies": {
-    "@electric-sql/pglite": "0.5.10",
     "@ffmpeg/ffmpeg": "0.12.15",
-    "motion": "14.5.0",
     "next": "16.4.2",
-    "postgres": "3.4.9",
     "react": "19.3.1",
-    "react-dom": "19.3.1",
-    "server-only": "^0.0.1",
-    "zod": "4.6.7"
+    "react-dom": "19.3.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "4.3.3",

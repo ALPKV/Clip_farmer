@@ -65,6 +65,8 @@ type MotionState = {
   progress: number;
   error: string | null;
   peaks: MotionPeak[] | null;
+  /** Using the slow frame-by-frame method because the browser wouldn't play the video. */
+  slow?: boolean;
   /** Stretches of video the scan saw clearly; Bat only only drops sounds inside them. */
   covered?: [number, number][];
 };
@@ -162,7 +164,7 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
     setMotion({ status: "running", progress: 0, error: null, peaks: null });
     scanMotion(
       src,
-      (p) => token === loadToken.current && setMotion((m) => ({ ...m, progress: p })),
+      (p, slow) => token === loadToken.current && setMotion((m) => ({ ...m, progress: p, slow })),
       () => token !== loadToken.current,
     )
       .then((series) => {

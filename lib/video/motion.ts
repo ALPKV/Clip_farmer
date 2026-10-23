@@ -9,9 +9,10 @@ import type { MotionSeries } from "@/lib/tracking/deliveries";
  */
 export async function scanMotion(
   src: string,
-  onProgress?: (fraction: number) => void,
+  onProgress?: (fraction: number, slow: boolean) => void,
   isCancelled: () => boolean = () => false,
 ): Promise<MotionSeries> {
+  let slow = false;
   const video = document.createElement("video");
   video.muted = true;
   video.playsInline = true;
@@ -57,7 +58,7 @@ export async function scanMotion(
       prev = gray;
       prevT = time;
       lastSample = Date.now();
-      onProgress?.(Math.min(1, time / duration));
+      onProgress?.(Math.min(1, time / duration), slow);
     };
 
     // As fast as the decoder keeps up with: speed up while frames arrive about every 0.2 s of video
@@ -72,27 +73,28 @@ export async function scanMotion(
     document.addEventListener("visibilitychange", resume);
     const tune = setInterval(() => {
       if (document.hidden) lastSample = Date.now();
-      if (Date.now() - lastSample > 10_000) stalled?.();
+      if (Date.now() - lastSample > 8_000) stalled?.();
       if (gaps.length < 5) return;
       const recent = gaps.slice(-10).sort((a, b) => a - b)[Math.min(4, gaps.length - 1)];
       if (recent > 0.35 && video.playbackRate > 1) video.playbackRate = Math.max(1, video.playbackRate / 1.5);
       else if (recent < 0.26 && video.playbackRate < 16) video.playbackRate = Math.min(16, video.playbackRate * 1.25);
     }, 1000);
 
+    let outcome: "ended" | "stalled";
     try {
-      await new Promise<void>((resolve, reject) => {
+      outcome = await new Promise<"ended" | "stalled">((resolve, reject) => {
         let done = false;
-        const finish = () => {
+        const finish = (how: "ended" | "stalled") => {
           if (!done) {
             done = true;
-            resolve();
+            resolve(how);
           }
         };
-        video.addEventListener("ended", finish, { once: true });
-        // Some browsers never fire "ended" when the last frames can't be decoded: stop when nothing
-        // new has arrived for 10 s, which is fine near the end and an error anywhere else.
-        stalled = () => (prevT > duration - 3 ? finish() : reject(new Error("Scanning stalled. Try again, or use another browser.")));
-        video.addEventListener("error", () => reject(new Error("Playback stopped while scanning.")), { once: true });
+        video.addEventListener("ended", () => finish("ended"), { once: true });
+        // No new frame for 8 s while the page is on screen: playback isn't working here (some phones
+        // block background video, for example in Low Power Mode). Near the end it just means done.
+        stalled = () => finish(prevT > duration - 3 ? "ended" : "stalled");
+        video.addEventListener("error", () => finish("stalled"), { once: true });
         if (typeof (video as Partial<HTMLVideoElement>).requestVideoFrameCallback === "function") {
           const onFrame = (_: number, meta: { mediaTime: number }) => {
             if (done) return;
@@ -111,13 +113,33 @@ export async function scanMotion(
             sample(video.currentTime);
           }, 25);
         }
-        video.play().catch(reject);
+        video.play().catch(() => finish("stalled"));
       });
     } finally {
       clearInterval(tune);
       document.removeEventListener("visibilitychange", resume);
     }
-    onProgress?.(1);
+
+    // Fallback that works in every browser: jump through the rest of the video a fifth of a second
+    // at a time and read each frame. Slower, but it doesn't depend on the video playing.
+    if (outcome === "stalled") {
+      slow = true;
+      video.pause();
+      const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+      const seekTo = (t: number) =>
+        new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, 4000);
+          video.addEventListener("seeked", () => (clearTimeout(timer), resolve()), { once: true });
+          video.currentTime = t;
+        });
+      for (let t = Math.max(0, prevT + 0.2); t < duration; t += 0.2) {
+        if (isCancelled()) throw new Error("cancelled");
+        while (document.hidden) await wait(500);
+        await seekTo(t);
+        sample(t);
+      }
+    }
+    onProgress?.(1, slow);
     return out;
   } finally {
     video.pause();

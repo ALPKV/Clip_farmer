@@ -622,6 +622,12 @@ function SilentBalls() {
           <p className="text-sm text-slate">
             Watching for bowling actions… {Math.round(motion.progress * 100)}%. Until it finishes, every bat sound is shown.
           </p>
+          {motion.slow ? (
+            <p className="text-sm text-warn">
+              Slow mode: this browser wouldn&apos;t play the video in the background, so Flipper is reading it frame by
+              frame. It will finish, just slowly. Next time, turn off Low Power Mode and keep this page on screen.
+            </p>
+          ) : null}
           <Meter value={motion.progress} max={1} />
         </div>
       ) : motion.status === "done" && seen < 0.8 ? (

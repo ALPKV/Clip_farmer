@@ -11,11 +11,11 @@ export type MotionSeries = { t: number[]; m: number[] };
 export type MotionPeak = { t: number; height: number };
 
 /**
- * Stretches where the scan got a picture at least every 0.3 s. When the page is in the background a
+ * Stretches where the scan got a picture at least every 0.45 s. When the page is in the background a
  * browser may hand over only one frame a second, which is too coarse to see a bowler: those
  * stretches are left out, and Bat only keeps every sound in them.
  */
-export function coveredSpans(series: MotionSeries, maxGap = 0.3): [number, number][] {
+export function coveredSpans(series: MotionSeries, maxGap = 0.45): [number, number][] {
   const spans: [number, number][] = [];
   const { t } = series;
   for (let i = 1; i < t.length; i++) {

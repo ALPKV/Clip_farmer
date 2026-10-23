@@ -4,7 +4,7 @@ import type { MotionSeries } from "@/lib/tracking/deliveries";
 
 /**
  * Plays a hidden copy of the video fast (the browser's own decoder, so it is quick even for long
- * 4K sessions) and measures, about ten times a second of video, how much of a small grey copy of the
+ * 4K sessions) and measures, about five times a second of video, how much of a small grey copy of the
  * picture changed. That is enough to see a bowler run in and bowl. Nothing leaves the device.
  */
 export async function scanMotion(
@@ -41,13 +41,13 @@ export async function scanMotion(
     let lastSample = Date.now();
 
     const sample = (time: number) => {
-      if (time - prevT < 0.095) return;
+      if (time - prevT < 0.195) return;
       ctx.drawImage(video, 0, 0, w, h);
       const px = ctx.getImageData(0, 0, w, h).data;
       const gray = new Uint8Array(w * h);
       for (let i = 0, p = 0; i < gray.length; i++, p += 4) gray[i] = (px[p] + 2 * px[p + 1] + px[p + 2]) >> 2;
       // Frames far apart (the page was in the background) can't show a bowling action: skip the pair.
-      if (prev && time - prevT <= 0.3) {
+      if (prev && time - prevT <= 0.45) {
         let moved = 0;
         for (let i = 0; i < gray.length; i++) if (Math.abs(gray[i] - prev[i]) > 20) moved++;
         out.t.push(time);
@@ -60,7 +60,7 @@ export async function scanMotion(
       onProgress?.(Math.min(1, time / duration));
     };
 
-    // As fast as the decoder keeps up with: speed up while frames arrive about every 0.1 s of video,
+    // As fast as the decoder keeps up with: speed up while frames arrive about every 0.2 s of video
     // slow down when it starts skipping (big gaps would exaggerate the motion).
     video.playbackRate = 8;
     let stalled: (() => void) | null = null;
@@ -75,8 +75,8 @@ export async function scanMotion(
       if (Date.now() - lastSample > 10_000) stalled?.();
       if (gaps.length < 5) return;
       const recent = gaps.slice(-10).sort((a, b) => a - b)[Math.min(4, gaps.length - 1)];
-      if (recent > 0.2 && video.playbackRate > 1) video.playbackRate = Math.max(1, video.playbackRate / 1.5);
-      else if (recent < 0.13 && video.playbackRate < 16) video.playbackRate = Math.min(16, video.playbackRate * 1.25);
+      if (recent > 0.35 && video.playbackRate > 1) video.playbackRate = Math.max(1, video.playbackRate / 1.5);
+      else if (recent < 0.26 && video.playbackRate < 16) video.playbackRate = Math.min(16, video.playbackRate * 1.25);
     }, 1000);
 
     try {

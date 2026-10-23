@@ -14,7 +14,7 @@ Highlights finds every ball in a net session in two ways, both in the browser:
    than before). That sits between the talking in session A (0.79, +0.41) and the most voiced real
    delivery (0.65, +0.22). One talking example is thin: more labelled sessions with chatter needed.
 2. **Bowling actions** (`lib/tracking/deliveries.ts`, `lib/video/motion.ts`, opt-in). The video is played
-   fast in a hidden player while a 90×160 grey copy is compared about ten times a second of video. A
+   fast in a hidden player while a 90×160 grey copy is compared about five times a second of video. A
    bowler running in and bowling is a sharp peak in how much of the picture changes. A peak with no bat
    sound in the next 2.6 s becomes a "No bat sound" clip: misses, leaves and bowled balls.
 

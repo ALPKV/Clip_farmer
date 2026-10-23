@@ -147,7 +147,7 @@ export async function scanMotion(
 
     // Short stretches start gently so frames arrive before the stretch is over; the speed control
     // then carries the best rate from one stretch to the next.
-    video.playbackRate = spans ? 2 : 8;
+    video.playbackRate = spans ? 3 : 8;
     for (const [a, b] of todo) {
       // Each stretch starts fresh: nothing is compared across a jump.
       prev = null;
@@ -169,7 +169,7 @@ export async function scanMotion(
     if (spans) {
       const seen = coveredSpans(out);
       for (const [a, b] of todo) {
-        if (seen.some(([x, y]) => x <= a + 0.3 && y >= b - 0.3)) continue;
+        if (seen.some(([x, y]) => x <= a + 0.4 && y >= b - 0.2)) continue;
         prev = null;
         prevT = -1;
         await seekSpan(a, b);
@@ -204,7 +204,8 @@ function mergeSpans(spans: [number, number][], duration: number): [number, numbe
   const out: [number, number][] = [];
   for (const [a, b] of sorted) {
     const last = out[out.length - 1];
-    if (last && a <= last[1] + 0.5) last[1] = Math.max(last[1], b);
+    // Playing through a short gap is quicker than jumping over it.
+    if (last && a <= last[1] + 1.5) last[1] = Math.max(last[1], b);
     else out.push([a, b]);
   }
   return out;

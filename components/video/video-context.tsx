@@ -2,7 +2,15 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { analyzeFrames, type BallAnalysis } from "@/lib/tracking/analyze";
-import { combineDeliveries, coveredLength, coveredSpans, motionPeaks, type MotionPeak } from "@/lib/tracking/deliveries";
+import {
+  clipWindows,
+  combineDeliveries,
+  coveredLength,
+  coveredSpans,
+  deliveryId,
+  motionPeaks,
+  type MotionPeak,
+} from "@/lib/tracking/deliveries";
 import { findImpacts, groupDeliveries, refineContact, type SoundDelivery } from "@/lib/tracking/hits";
 import { DEFAULT_SETUP, lengthM, lineCm, speedKmh, type Setup } from "@/lib/tracking/metrics";
 import { extractAudio, releaseEngine } from "@/lib/video/ffmpeg";
@@ -167,14 +175,23 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
 
   // Ticking "Add balls with no bat sound" mid-scan asks for a whole-video scan once this one ends.
   const wantFull = useRef(false);
+  // The loudness setting, for scans started from callbacks.
+  const thresholdRef = useRef(DEFAULT_SETTINGS.threshold);
+  useEffect(() => {
+    thresholdRef.current = settings.threshold;
+  }, [settings.threshold]);
 
   /**
    * Watches for bowling actions (see lib/video/motion.ts). Starts by itself once the sound is read.
    * Bat only needs just the 3 s before each bat sound (any loudness the slider can reach), so by
    * default only those stretches are watched; `full` watches the whole video.
    */
-  const runScan = useCallback((src: string, token: number, full: boolean, snd: SoundDelivery[] | null) => {
-    const spans = full ? undefined : (snd ?? []).filter((d) => d.rel > -41).map((d): [number, number] => [d.contact - 3.4, d.contact + 0.4]);
+  const runScan = useCallback((src: string, token: number, full: boolean, snd: SoundDelivery[] | null, thresholdDb: number) => {
+    // Only sounds loud enough to become clips need checking; lowering the slider later shows the new
+    // ones unchecked (kept) until Check again.
+    const spans = full
+      ? undefined
+      : (snd ?? []).filter((d) => d.rel > thresholdDb).map((d): [number, number] => [d.contact - 3.2, d.contact + 0.3]);
     const planned = spans ? coveredLength(spans) : undefined;
     setMotion({ status: "running", progress: 0, error: null, peaks: null, full, planned });
     scanMotion(
@@ -188,7 +205,7 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
         setMotion({ status: "done", progress: 1, error: null, peaks: motionPeaks(series), covered: coveredSpans(series), full, planned });
         if (!full && wantFull.current) {
           wantFull.current = false;
-          runScan(src, token, true, snd);
+          runScan(src, token, true, snd, thresholdDb);
         }
       })
       .catch((err: Error) => {
@@ -245,7 +262,7 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
           setSounds(grouped);
           setFps(res.fps);
           setAudio({ status: "ready", progress: 1, error: null });
-          runScan(u, token, false, grouped);
+          runScan(u, token, false, grouped, thresholdRef.current);
         })
         .catch((err: Error) => {
           if (token !== loadToken.current) return;
@@ -261,14 +278,14 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
 
   /** Retry for the bowling scan if it failed; it normally starts by itself. */
   const scanForSilentBalls = useCallback(() => {
-    if (url && motion.status !== "running") runScan(url, loadToken.current, !!motion.full, sounds);
-  }, [url, motion.status, motion.full, sounds, runScan]);
+    if (url && motion.status !== "running") runScan(url, loadToken.current, !!motion.full, sounds, settings.threshold);
+  }, [url, motion.status, motion.full, sounds, settings.threshold, runScan]);
 
   const scanWholeVideo = useCallback(() => {
     if (!url || motion.full) return;
     if (motion.status === "running") wantFull.current = true;
-    else runScan(url, loadToken.current, true, sounds);
-  }, [url, motion.status, motion.full, sounds, runScan]);
+    else runScan(url, loadToken.current, true, sounds, settings.threshold);
+  }, [url, motion.status, motion.full, sounds, settings.threshold, runScan]);
 
   const deliveries = useMemo(
     () =>
@@ -284,27 +301,17 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
 
   const clips: Clip[] = useMemo(() => {
     const duration = meta?.duration ?? Infinity;
-    const auto: Clip[] = deliveries.map((d, k) => {
-      // A ball with no bat sound is anchored where it reaches the batter; show its release too.
-      const lead = settings.leadIn + (d.kind === "no-sound" ? 0.5 : 0);
-      let start = Math.max(0, d.t - lead);
-      let end = Math.min(duration, start + settings.length + (d.kind === "no-sound" ? 0.5 : 0));
-      // Never show the previous or next shot: stop short of the neighbouring deliveries.
-      const prev = deliveries[k - 1];
-      const next = deliveries[k + 1];
-      if (prev) start = Math.min(Math.max(start, prev.t + 0.3), d.t - 0.4);
-      if (next) end = Math.max(Math.min(end, next.t - 0.3), d.t + 0.5);
-      return {
-        id: `${d.kind === "bat" ? "a" : "s"}${d.t.toFixed(3)}`,
-        start,
-        end,
-        contact: d.kind === "bat" ? d.t : null,
-        level: d.rel,
-        kind: d.kind,
-        manual: false,
-      };
-    });
-    return [...auto.filter((c) => !removed.has(c.id)), ...manual].sort((a, b) => a.start - b.start);
+    const kept = deliveries.filter((d) => !removed.has(deliveryId(d)));
+    const auto: Clip[] = clipWindows(kept, settings.leadIn, settings.length, duration).map(({ delivery: d, start, end }) => ({
+      id: deliveryId(d),
+      start,
+      end,
+      contact: d.kind === "bat" ? d.t : null,
+      level: d.rel,
+      kind: d.kind,
+      manual: false,
+    }));
+    return [...auto, ...manual].sort((a, b) => a.start - b.start);
   }, [deliveries, manual, removed, settings.leadIn, settings.length, meta]);
 
   const addManualClip = useCallback(

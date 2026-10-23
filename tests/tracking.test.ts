@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { detect, defaultDetectOptions, defaultTrackOptions, findBounce, track, type Gray, type TrackPoint } from "../lib/tracking/core.ts";
 import { analyzeFrames } from "../lib/tracking/analyze.ts";
-import { combineDeliveries, motionPeaks } from "../lib/tracking/deliveries.ts";
+import { clipWindows, combineDeliveries, motionPeaks } from "../lib/tracking/deliveries.ts";
 import { FEATURE_COUNT } from "../lib/tracking/model.ts";
 import { findImpacts, groupDeliveries, isSpeech, refineContact } from "../lib/tracking/hits.ts";
 import { CREASE_TO_CREASE_M, DEFAULT_SETUP, lengthM, lineCm, speedKmh } from "../lib/tracking/metrics.ts";
@@ -143,4 +143,20 @@ test("adds balls with no bat sound from bowling actions", () => {
   const sounds = [6.0, 9.5].map((contact) => ({ contact, levelDb: -3, rel: 0 }));
   assert.deepEqual(combineDeliveries(sounds, peaks, -25, { batOnly: true }).map((d) => d.t), [6]);
   assert.deepEqual(combineDeliveries(sounds, peaks, -25).map((d) => d.t), [6, 9.5]);
+});
+
+test("balls close together each keep their own clip", () => {
+  const ball = (t: number) => ({ t, kind: "bat" as const, rel: 0 });
+  // Three deliveries 1.5 s apart (two nets side by side), with the usual 1 s lead-in and 2.5 s clip.
+  const w = clipWindows([ball(10), ball(11.5), ball(13)], 1, 2.5);
+  assert.equal(w.length, 3);
+  for (const { delivery, start, end } of w) assert.ok(start < delivery.t && end > delivery.t, `clip ${start}-${end} misses ${delivery.t}`);
+  for (let k = 1; k < w.length; k++) assert.ok(w[k].start >= w[k - 1].end, "clips overlap");
+  // Removing the middle one (Not a shot) gives its neighbours their full length back.
+  const two = clipWindows([ball(10), ball(13)], 1, 2.5);
+  assert.deepEqual(two.map((c) => [c.start, c.end]), [[9, 11.5], [12, 14.5]]);
+  // Bat only keeps every ball that has a bowler before it, however close.
+  const peaks = [{ t: 9, height: 0.2 }, { t: 10.6, height: 0.2 }, { t: 12.1, height: 0.2 }];
+  const sounds = [10, 11.5, 13].map((contact) => ({ contact, levelDb: -3, rel: 0 }));
+  assert.equal(combineDeliveries(sounds, peaks, -25, { batOnly: true }).length, 3);
 });

@@ -103,8 +103,8 @@ export function combineDeliveries(
   }: { batOnly?: boolean; addSilent?: boolean; covered?: [number, number][] } = {},
 ): Delivery[] {
   let heard: Delivery[] = sounds.filter((s) => s.rel > thresholdDb).map((s) => ({ t: s.contact, kind: "bat", rel: s.rel }));
-  // The scan must have seen the 3 s before a sound clearly to rule it out.
-  const seen = (t: number) => !covered || covered.some(([a, b]) => a <= t - 3 && b >= t + 0.2);
+  // The scan must have seen the time before a sound clearly to rule it out.
+  const seen = (t: number) => !covered || covered.some(([a, b]) => a <= t - 2.8 && b >= t + 0.1);
   if (batOnly && peaks) {
     heard = heard.filter((h) => !seen(h.t) || peaks.some((p) => h.t - p.t >= -0.2 && h.t - p.t <= 3));
   }
@@ -114,4 +114,32 @@ export function combineDeliveries(
         .map((p) => ({ t: p.t + 0.9, kind: "no-sound", rel: null }))
     : [];
   return [...heard, ...silent].sort((a, b) => a.t - b.t);
+}
+
+export const deliveryId = (d: Delivery) => `${d.kind === "bat" ? "a" : "s"}${d.t.toFixed(3)}`;
+
+/**
+ * The clip around each delivery: `leadIn` before it and `length` long, but never reaching into the
+ * neighbouring deliveries, so every ball keeps its own clip however close the next one is. Pass only
+ * the deliveries being kept (not ones marked Not a shot), so a removed fake doesn't shorten its
+ * neighbours.
+ */
+export function clipWindows(
+  deliveries: Delivery[],
+  leadIn: number,
+  length: number,
+  duration = Infinity,
+): { delivery: Delivery; start: number; end: number }[] {
+  const list = [...deliveries].sort((a, b) => a.t - b.t);
+  return list.map((d, k) => {
+    // A ball with no bat sound is anchored where it reaches the batter; show its release too.
+    const extra = d.kind === "no-sound" ? 0.5 : 0;
+    let start = Math.max(0, d.t - leadIn - extra);
+    let end = Math.min(duration, start + length + extra);
+    const prev = list[k - 1];
+    const next = list[k + 1];
+    if (prev) start = Math.min(Math.max(start, (prev.t + d.t) / 2, prev.t + 0.3), d.t - 0.2);
+    if (next) end = Math.max(Math.min(end, (d.t + next.t) / 2, next.t - 0.3), d.t + 0.2);
+    return { delivery: d, start, end: Math.min(duration, end) };
+  });
 }

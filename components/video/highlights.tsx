@@ -21,6 +21,12 @@ import { FileBar, VideoDrop, clock } from "./video-drop";
 import { useVideo, type Clip } from "./video-context";
 
 /** One part of the highlights: clips [from, to) of the ticked clips. */
+/** Quick settings for the sensitivity slider. */
+const SENSITIVITY_PRESETS = [
+  { label: "Normal", threshold: -25, note: "Every shot, soft ones too" },
+  { label: "Big hits only", threshold: -10, note: "Just the loudest shots" },
+];
+
 type Reel = { url: string; blob: Blob; clips: number; seconds: number; part: number; from: number; to: number };
 type Ready = { blob: Blob; name: string; label: string };
 
@@ -453,6 +459,21 @@ export function Highlights() {
         <aside className="space-y-5">
           <Panel title="Detection">
             <p className="text-sm text-slate">A sound louder than the sensitivity makes a clip. Sounds right after a clip are skipped.</p>
+            <div className="mt-3 grid grid-cols-2 gap-1.5">
+              {SENSITIVITY_PRESETS.map((p) => {
+                const on = v.settings.threshold === p.threshold;
+                return (
+                  <button
+                    key={p.label}
+                    onClick={() => v.setSettings({ ...v.settings, threshold: p.threshold })}
+                    className={`border px-2 py-2 text-left text-xs ${on ? "border-navy bg-navy text-white" : "border-line bg-white text-ink hover:border-navy"}`}
+                  >
+                    <span className="block font-display text-sm font-bold uppercase tracking-wide">{p.label}</span>
+                    <span className={on ? "text-white/70" : "text-mute"}>{p.note}</span>
+                  </button>
+                );
+              })}
+            </div>
             <Slider label="Sensitivity" value={v.settings.threshold} min={-40} max={-5} step={1}
               format={(n) => `${n} dB`} onChange={(n) => v.setSettings({ ...v.settings, threshold: n })} />
             <p className="mt-1 text-xs text-mute">Lower picks up softer shots (and more noise); higher keeps only big hits.</p>

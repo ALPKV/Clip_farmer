@@ -13,11 +13,15 @@ import { coveredSpans, type MotionSeries } from "@/lib/tracking/deliveries";
  * video (an iPhone in Low Power Mode, for example) each stretch is read frame by frame instead,
  * which works everywhere but is several times slower.
  */
+/** Thrown when the browser won't open the video until the person taps (iPhone Low Power Mode). */
+export const NEEDS_TAP = "needs-tap";
+
 export async function scanMotion(
   src: string,
   onProgress?: (fraction: number, slow: boolean) => void,
   isCancelled: () => boolean = () => false,
   spans?: [number, number][],
+  onStatus?: (status: string) => void,
 ): Promise<MotionSeries> {
   const video = document.createElement("video");
   video.muted = true;
@@ -28,11 +32,16 @@ export async function scanMotion(
     position: "fixed", left: "0", bottom: "0", width: "16px", height: "16px", opacity: "0.01", pointerEvents: "none", zIndex: "1",
   });
   document.body.appendChild(video);
+  // When started from a tap, playing right away (still inside the tap) unlocks this player for the
+  // rest of the scan, even where pages may not play video by themselves.
+  void video.play().then(() => video.pause(), () => {});
   const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
   try {
+    onStatus?.("Opening the video");
     await new Promise<void>((resolve, reject) => {
-      video.addEventListener("loadedmetadata", () => resolve(), { once: true });
-      video.addEventListener("error", () => reject(new Error("This video could not be played for scanning.")), { once: true });
+      const timer = setTimeout(() => reject(new Error(NEEDS_TAP)), 10_000);
+      video.addEventListener("loadedmetadata", () => (clearTimeout(timer), resolve()), { once: true });
+      video.addEventListener("error", () => (clearTimeout(timer), reject(new Error("This video could not be played for scanning."))), { once: true });
     });
     const duration = video.duration;
     const todo = mergeSpans(spans ?? [[0, duration]], duration);
@@ -148,7 +157,10 @@ export async function scanMotion(
     // Short stretches start gently so frames arrive before the stretch is over; the speed control
     // then carries the best rate from one stretch to the next.
     video.playbackRate = spans ? 3 : 8;
+    let n = 0;
     for (const [a, b] of todo) {
+      n++;
+      onStatus?.(spans ? `Checking stretch ${n} of ${todo.length}` : "Watching the whole video");
       // Each stretch starts fresh: nothing is compared across a jump.
       prev = null;
       prevT = -1;
@@ -158,6 +170,8 @@ export async function scanMotion(
         // A short stretch gets a few seconds to start playing; the whole video a little longer.
         if ((await playSpan(a, b, spans ? 4000 : 8000)) === "stalled") {
           slow = true;
+          // Nothing played at all yet: the browser is blocking it, and only a tap will help.
+          if (out.t.length === 0 && n === 1 && video.readyState < 2) throw new Error(NEEDS_TAP);
           await seekSpan(Math.max(a, prevT + 0.2), b);
         }
       }
@@ -167,6 +181,7 @@ export async function scanMotion(
     // Second pass: any stretch playback didn't show clearly (frames too far apart) is read frame by
     // frame, so every bat sound gets a proper check.
     if (spans) {
+      onStatus?.("Re-reading the stretches it couldn't see clearly");
       const seen = coveredSpans(out);
       for (const [a, b] of todo) {
         if (seen.some(([x, y]) => x <= a + 0.4 && y >= b - 0.2)) continue;

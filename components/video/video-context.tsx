@@ -15,7 +15,7 @@ import { findImpacts, groupDeliveries, refineContact, type SoundDelivery } from 
 import { DEFAULT_SETUP, lengthM, lineCm, speedKmh, type Setup } from "@/lib/tracking/metrics";
 import { extractAudio, releaseEngine } from "@/lib/video/ffmpeg";
 import { captureFrames } from "@/lib/video/frames";
-import { scanMotion } from "@/lib/video/motion";
+import { NEEDS_TAP, scanMotion } from "@/lib/video/motion";
 
 /**
  * The loaded video and everything derived from it, shared by the Highlights and Ball Tracking
@@ -79,6 +79,10 @@ type MotionState = {
   full?: boolean;
   /** Seconds of video the scan was asked to watch. */
   planned?: number;
+  /** What the scan is doing right now, in words. */
+  detail?: string;
+  /** The browser wouldn't open the video by itself: the check must be started with a tap. */
+  needsTap?: boolean;
   /** Stretches of video the scan saw clearly; Bat only only drops sounds inside them. */
   covered?: [number, number][];
 };
@@ -199,6 +203,7 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
       (p, slow) => token === loadToken.current && setMotion((m) => ({ ...m, progress: p, slow })),
       () => token !== loadToken.current,
       spans,
+      (detail) => token === loadToken.current && setMotion((m) => ({ ...m, detail })),
     )
       .then((series) => {
         if (token !== loadToken.current) return;
@@ -209,7 +214,16 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
         }
       })
       .catch((err: Error) => {
-        if (token === loadToken.current) setMotion({ status: "error", progress: 0, error: err.message, peaks: null });
+        if (token !== loadToken.current) return;
+        if (err.message === NEEDS_TAP) {
+          setMotion({
+            status: "error",
+            progress: 0,
+            peaks: null,
+            needsTap: true,
+            error: "Your phone didn't let Flipper open the video in the background (often because of Low Power Mode).",
+          });
+        } else setMotion({ status: "error", progress: 0, error: err.message, peaks: null });
       });
   }, []);
 

@@ -628,6 +628,7 @@ function SilentBalls() {
           <p className="text-sm text-slate">
             Watching for bowling actions… {Math.round(motion.progress * 100)}%. Until it finishes, every bat sound is shown.
           </p>
+          {motion.detail ? <p className="text-xs text-mute">{motion.detail}…</p> : null}
           {motion.slow ? (
             <p className="text-sm text-warn">
               Slow mode: this browser wouldn&apos;t play the video in the background, so Flipper is reading it frame by
@@ -649,6 +650,11 @@ function SilentBalls() {
           Done. {settings.batOnly ? "Only bat sounds after a bowling action are kept." : "Bat only is off: every bat sound is kept."}
           {settings.addSilent ? ` ${silent} ${silent === 1 ? "ball" : "balls"} with no bat sound added.` : ""}
         </p>
+      ) : motion.status === "error" && motion.needsTap ? (
+        <>
+          <p className="mt-3 text-sm text-warn">{motion.error} Until it runs, every bat sound is shown.</p>
+          <Button className="mt-2" tone="gold" onClick={scanForSilentBalls}>Start the check</Button>
+        </>
       ) : motion.status === "error" ? (
         <>
           <p className="mt-3 text-sm text-risk">{motion.error} Every bat sound is shown instead.</p>

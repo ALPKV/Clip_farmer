@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { analyzeFrames, type BallAnalysis } from "@/lib/tracking/analyze";
-import { combineDeliveries, coveredSpans, motionPeaks, type MotionPeak } from "@/lib/tracking/deliveries";
+import { combineDeliveries, coveredLength, coveredSpans, motionPeaks, type MotionPeak } from "@/lib/tracking/deliveries";
 import { findImpacts, groupDeliveries, refineContact, type SoundDelivery } from "@/lib/tracking/hits";
 import { DEFAULT_SETUP, lengthM, lineCm, speedKmh, type Setup } from "@/lib/tracking/metrics";
 import { extractAudio, releaseEngine } from "@/lib/video/ffmpeg";
@@ -67,6 +67,10 @@ type MotionState = {
   peaks: MotionPeak[] | null;
   /** Using the slow frame-by-frame method because the browser wouldn't play the video. */
   slow?: boolean;
+  /** Watched the whole video (needed for balls with no bat sound), not just before each bat sound. */
+  full?: boolean;
+  /** Seconds of video the scan was asked to watch. */
+  planned?: number;
   /** Stretches of video the scan saw clearly; Bat only only drops sounds inside them. */
   covered?: [number, number][];
 };
@@ -81,6 +85,8 @@ type Ctx = {
   /** The scan for bowling actions, which finds balls that made no bat sound. */
   motion: MotionState;
   scanForSilentBalls: () => void;
+  /** Watch the whole video, for balls with no bat sound. */
+  scanWholeVideo: () => void;
   settings: ClipSettings;
   setSettings: (s: ClipSettings) => void;
   clips: Clip[];
@@ -159,17 +165,30 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   }, []);
 
-  /** Watches for bowling actions (see lib/video/motion.ts). Starts by itself once the sound is read. */
-  const runScan = useCallback((src: string, token: number) => {
-    setMotion({ status: "running", progress: 0, error: null, peaks: null });
+  // Ticking "Add balls with no bat sound" mid-scan asks for a whole-video scan once this one ends.
+  const wantFull = useRef(false);
+
+  /**
+   * Watches for bowling actions (see lib/video/motion.ts). Starts by itself once the sound is read.
+   * Bat only needs just the 3 s before each bat sound (any loudness the slider can reach), so by
+   * default only those stretches are watched; `full` watches the whole video.
+   */
+  const runScan = useCallback((src: string, token: number, full: boolean, snd: SoundDelivery[] | null) => {
+    const spans = full ? undefined : (snd ?? []).filter((d) => d.rel > -41).map((d): [number, number] => [d.contact - 3.4, d.contact + 0.4]);
+    const planned = spans ? coveredLength(spans) : undefined;
+    setMotion({ status: "running", progress: 0, error: null, peaks: null, full, planned });
     scanMotion(
       src,
       (p, slow) => token === loadToken.current && setMotion((m) => ({ ...m, progress: p, slow })),
       () => token !== loadToken.current,
+      spans,
     )
       .then((series) => {
-        if (token === loadToken.current) {
-          setMotion({ status: "done", progress: 1, error: null, peaks: motionPeaks(series), covered: coveredSpans(series) });
+        if (token !== loadToken.current) return;
+        setMotion({ status: "done", progress: 1, error: null, peaks: motionPeaks(series), covered: coveredSpans(series), full, planned });
+        if (!full && wantFull.current) {
+          wantFull.current = false;
+          runScan(src, token, true, snd);
         }
       })
       .catch((err: Error) => {
@@ -226,7 +245,7 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
           setSounds(grouped);
           setFps(res.fps);
           setAudio({ status: "ready", progress: 1, error: null });
-          runScan(u, token);
+          runScan(u, token, false, grouped);
         })
         .catch((err: Error) => {
           if (token !== loadToken.current) return;
@@ -242,8 +261,14 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
 
   /** Retry for the bowling scan if it failed; it normally starts by itself. */
   const scanForSilentBalls = useCallback(() => {
-    if (url && motion.status !== "running") runScan(url, loadToken.current);
-  }, [url, motion.status, runScan]);
+    if (url && motion.status !== "running") runScan(url, loadToken.current, !!motion.full, sounds);
+  }, [url, motion.status, motion.full, sounds, runScan]);
+
+  const scanWholeVideo = useCallback(() => {
+    if (!url || motion.full) return;
+    if (motion.status === "running") wantFull.current = true;
+    else runScan(url, loadToken.current, true, sounds);
+  }, [url, motion.status, motion.full, sounds, runScan]);
 
   const deliveries = useMemo(
     () =>
@@ -375,6 +400,7 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
     audio,
     motion,
     scanForSilentBalls,
+    scanWholeVideo,
     settings,
     setSettings,
     clips,

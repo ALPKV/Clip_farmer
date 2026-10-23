@@ -509,9 +509,13 @@ export function Highlights() {
               </span>
             </label>
             <label className="mt-2 flex items-start gap-2 text-sm">
-              <input type="checkbox" className="mt-1" checked={v.settings.addSilent} onChange={(e) => v.setSettings({ ...v.settings, addSilent: e.target.checked })} />
+              <input type="checkbox" className="mt-1" checked={v.settings.addSilent} onChange={(e) => {
+                  v.setSettings({ ...v.settings, addSilent: e.target.checked });
+                  // Finding balls with no bat sound needs the whole video watched, not just before each sound.
+                  if (e.target.checked) v.scanWholeVideo();
+                }} />
               <span>
-                <b>Add balls with no bat sound</b>: misses, leaves and bowled.
+                <b>Add balls with no bat sound</b>: misses, leaves and bowled. Watches the whole video, so it takes longer.
               </span>
             </label>
           </Panel>
@@ -611,7 +615,9 @@ function SilentBalls() {
   const { motion, scanForSilentBalls, clips, settings, meta } = useVideo();
   const silent = clips.filter((c) => c.kind === "no-sound").length;
   const seenSec = (motion.covered ?? []).reduce((a, [x, y]) => a + (y - x), 0);
-  const seen = meta?.duration ? seenSec / meta.duration : 1;
+  // Against what the scan was asked to watch: the stretches before each bat sound, or the whole video.
+  const planned = motion.planned ?? meta?.duration ?? 0;
+  const seen = planned ? Math.min(1, seenSec / planned) : 1;
   return (
     <Panel title="Bowler check">
       <p className="text-sm text-slate">
@@ -633,7 +639,7 @@ function SilentBalls() {
       ) : motion.status === "done" && seen < 0.8 ? (
         <>
           <p className="mt-3 text-sm text-warn">
-            The browser only showed part of the video ({Math.round(seen * 100)}%), usually because Flipper wasn&apos;t on
+            The browser only showed part of what it needed to check ({Math.round(seen * 100)}%), usually because Flipper wasn&apos;t on
             screen. Bat sounds in the parts it couldn&apos;t see are all kept. Keep this page open and on screen, then:
           </p>
           <Button className="mt-2" size="sm" tone="navy" onClick={scanForSilentBalls}>Check again</Button>

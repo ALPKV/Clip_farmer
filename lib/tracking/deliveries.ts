@@ -27,6 +27,18 @@ export function coveredSpans(series: MotionSeries, maxGap = 0.45): [number, numb
   return spans;
 }
 
+/** Total length of a set of stretches, counting overlaps once. */
+export function coveredLength(spans: [number, number][]): number {
+  let total = 0;
+  let end = -Infinity;
+  for (const [a, b] of [...spans].sort((x, y) => x[0] - y[0])) {
+    if (b <= end) continue;
+    total += b - Math.max(a, end);
+    end = b;
+  }
+  return total;
+}
+
 /** Resamples the motion series to 10 per second, smooths it, and finds peaks at least 2 s apart. */
 export function motionPeaks(series: MotionSeries, minProminence = 0.02): MotionPeak[] {
   const { t, m } = series;

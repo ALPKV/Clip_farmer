@@ -10,6 +10,23 @@ import type { SoundDelivery } from "./hits.ts";
 export type MotionSeries = { t: number[]; m: number[] };
 export type MotionPeak = { t: number; height: number };
 
+/**
+ * Stretches where the scan got a picture at least every 0.3 s. When the page is in the background a
+ * browser may hand over only one frame a second, which is too coarse to see a bowler: those
+ * stretches are left out, and Bat only keeps every sound in them.
+ */
+export function coveredSpans(series: MotionSeries, maxGap = 0.3): [number, number][] {
+  const spans: [number, number][] = [];
+  const { t } = series;
+  for (let i = 1; i < t.length; i++) {
+    if (t[i] - t[i - 1] > maxGap) continue;
+    const last = spans[spans.length - 1];
+    if (last && last[1] >= t[i - 1] - 1e-6) last[1] = t[i];
+    else spans.push([t[i - 1], t[i]]);
+  }
+  return spans;
+}
+
 /** Resamples the motion series to 10 per second, smooths it, and finds peaks at least 2 s apart. */
 export function motionPeaks(series: MotionSeries, minProminence = 0.02): MotionPeak[] {
   const { t, m } = series;
@@ -56,13 +73,33 @@ export type Delivery = {
 };
 
 /**
- * All deliveries: every sound delivery above `thresholdDb`, plus every bowling action with no such
- * sound in the 2.6 s after it (the ball reaches the batter about a second after release).
+ * All deliveries from bat sounds above `thresholdDb`.
+ *
+ * - `batOnly` (with the motion scan done): a bat sound counts only if a bowling action came 0–3 s
+ *   before it. Talking, the ball being thrown back and other nets' noise have no bowler in front of
+ *   them. On a session with lots of chatter this cut fake clips from 13 to 1 (scripts/deliveries).
+ * - `addSilent`: also every bowling action with no bat sound in the 2.6 s after it (misses, leaves).
  */
-export function combineDeliveries(sounds: SoundDelivery[], peaks: MotionPeak[] | null, thresholdDb: number): Delivery[] {
-  const heard: Delivery[] = sounds.filter((s) => s.rel > thresholdDb).map((s) => ({ t: s.contact, kind: "bat", rel: s.rel }));
-  const silent: Delivery[] = (peaks ?? [])
-    .filter((p) => !heard.some((h) => h.t >= p.t - 0.3 && h.t <= p.t + 2.6))
-    .map((p) => ({ t: p.t + 0.9, kind: "no-sound", rel: null }));
+export function combineDeliveries(
+  sounds: SoundDelivery[],
+  peaks: MotionPeak[] | null,
+  thresholdDb: number,
+  {
+    batOnly = false,
+    addSilent = false,
+    covered,
+  }: { batOnly?: boolean; addSilent?: boolean; covered?: [number, number][] } = {},
+): Delivery[] {
+  let heard: Delivery[] = sounds.filter((s) => s.rel > thresholdDb).map((s) => ({ t: s.contact, kind: "bat", rel: s.rel }));
+  // The scan must have seen the 3 s before a sound clearly to rule it out.
+  const seen = (t: number) => !covered || covered.some(([a, b]) => a <= t - 3 && b >= t + 0.2);
+  if (batOnly && peaks) {
+    heard = heard.filter((h) => !seen(h.t) || peaks.some((p) => h.t - p.t >= -0.2 && h.t - p.t <= 3));
+  }
+  const silent: Delivery[] = addSilent
+    ? (peaks ?? [])
+        .filter((p) => !heard.some((h) => h.t >= p.t - 0.3 && h.t <= p.t + 2.6))
+        .map((p) => ({ t: p.t + 0.9, kind: "no-sound", rel: null }))
+    : [];
   return [...heard, ...silent].sort((a, b) => a.t - b.t);
 }

@@ -16,7 +16,10 @@ export function Stage({
   calibrating?: boolean;
   onCalibrate?: (x: number) => void;
 }) {
-  const { url, meta, playerRef, overlay, setOverlay, analyses, marks, setup } = useVideo();
+  const { url, meta, playerRef, overlay, setOverlay, analyses, marks, setup, clips, select } = useVideo();
+  // Set when playback starts at a clip's start (Play clip, or Play in the list): stop at its end.
+  // Playing the whole video from anywhere else just keeps going.
+  const stopAt = useRef<number | null>(null);
   const ratio = meta && meta.width && meta.height ? meta.height / meta.width : 9 / 16;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -49,11 +52,24 @@ export function Stage({
     };
   }, [playerRef, url]);
 
-  // Stop at the end of the selected clip.
   useEffect(() => {
     const v = playerRef.current;
-    if (v && clip && !v.paused && time >= clip.end) v.pause();
-  }, [time, clip, playerRef]);
+    if (!v) return;
+    const onPlay = () => {
+      stopAt.current = clip && Math.abs(v.currentTime - clip.start) < 0.3 ? clip.end : null;
+    };
+    v.addEventListener("play", onPlay);
+    return () => v.removeEventListener("play", onPlay);
+  }, [clip, playerRef]);
+
+  // Stop at the end of the clip being played.
+  useEffect(() => {
+    const v = playerRef.current;
+    if (v && stopAt.current != null && !v.paused && time >= stopAt.current) {
+      stopAt.current = null;
+      v.pause();
+    }
+  }, [time, playerRef]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -202,6 +218,23 @@ export function Stage({
           </p>
         ) : null}
       </div>
+      {meta?.duration && clips.length > 0 ? (
+        <ClipBar
+          duration={meta.duration}
+          time={time}
+          clips={clips}
+          selectedId={clip?.id ?? null}
+          onSeek={(t) => {
+            const v = playerRef.current;
+            if (v) v.currentTime = t;
+          }}
+          onPick={(c) => {
+            select(c.id);
+            const v = playerRef.current;
+            if (v) v.currentTime = c.start;
+          }}
+        />
+      ) : null}
       <div className="flex flex-wrap items-center gap-2 border-t border-white/10 px-3 py-2 text-white">
         <ToggleTracking on={overlay} onChange={setOverlay} />
         <div className="mx-1 h-6 w-px bg-white/15" />
@@ -212,6 +245,66 @@ export function Stage({
           {time.toFixed(3)} s · ~{Math.round(fps)} fps
         </span>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The whole session as a bar with every clip marked on it (gold: bat sound, outline: no bat sound,
+ * grey: added by hand). Tap a mark to jump to that clip; tap anywhere else to jump there.
+ */
+function ClipBar({
+  duration,
+  time,
+  clips,
+  selectedId,
+  onSeek,
+  onPick,
+}: {
+  duration: number;
+  time: number;
+  clips: Clip[];
+  selectedId: string | null;
+  onSeek: (t: number) => void;
+  onPick: (c: Clip) => void;
+}) {
+  const pct = (t: number) => `${Math.min(100, Math.max(0, (t / duration) * 100))}%`;
+  return (
+    <div className="border-t border-white/10 px-3 pb-1 pt-2">
+      <div
+        className="relative h-7 cursor-pointer bg-white/10"
+        role="slider"
+        aria-label="Session timeline with clips marked"
+        aria-valuemin={0}
+        aria-valuemax={Math.round(duration)}
+        aria-valuenow={Math.round(time)}
+        tabIndex={0}
+        onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          onSeek(((e.clientX - r.left) / r.width) * duration);
+        }}
+      >
+        {clips.map((c, k) => {
+          const sel = c.id === selectedId;
+          const tone = c.kind === "bat" ? "bg-gold border-gold" : c.kind === "no-sound" ? "bg-transparent border-gold" : "bg-white/50 border-white/50";
+          return (
+            <button
+              key={c.id}
+              type="button"
+              title={`Clip ${k + 1}`}
+              aria-label={`Clip ${k + 1}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onPick(c);
+              }}
+              className={`absolute top-1 bottom-1 min-w-[3px] border ${tone} ${sel ? "ring-2 ring-white" : "opacity-80 hover:opacity-100"}`}
+              style={{ left: pct(c.start), width: pct(c.end - c.start) }}
+            />
+          );
+        })}
+        <span aria-hidden className="pointer-events-none absolute inset-y-0 w-0.5 bg-white" style={{ left: pct(time) }} />
+      </div>
+      <p className="mt-1 text-[0.7rem] text-white/50">Tap a mark to jump to that clip, or play the whole video and watch them go by.</p>
     </div>
   );
 }

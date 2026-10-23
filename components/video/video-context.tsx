@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { analyzeFrames, type BallAnalysis } from "@/lib/tracking/analyze";
-import { combineDeliveries, motionPeaks, type MotionPeak } from "@/lib/tracking/deliveries";
+import { combineDeliveries, coveredSpans, motionPeaks, type MotionPeak } from "@/lib/tracking/deliveries";
 import { findImpacts, groupDeliveries, refineContact, type SoundDelivery } from "@/lib/tracking/hits";
 import { DEFAULT_SETUP, lengthM, lineCm, speedKmh, type Setup } from "@/lib/tracking/metrics";
 import { extractAudio, releaseEngine } from "@/lib/video/ffmpeg";
@@ -24,7 +24,16 @@ export const PRESETS = {
 } as const;
 export type PresetKey = keyof typeof PRESETS;
 
-export type ClipSettings = { preset: PresetKey; threshold: number; leadIn: number; length: number };
+export type ClipSettings = {
+  preset: PresetKey;
+  threshold: number;
+  leadIn: number;
+  length: number;
+  /** Keep a bat sound only when the bowler bowled just before it (needs the bowling scan). */
+  batOnly: boolean;
+  /** Also add balls the bowler bowled that made no bat sound. */
+  addSilent: boolean;
+};
 
 export type Clip = {
   id: string;
@@ -51,7 +60,14 @@ export type AnalysisState = {
 export type TrackingSetup = Setup & { stumps: { leftX: number; rightX: number } | null };
 
 type AudioState = { status: "idle" | "loading" | "ready" | "error" | "none"; progress: number; error: string | null };
-type MotionState = { status: "idle" | "running" | "done" | "error"; progress: number; error: string | null; peaks: MotionPeak[] | null };
+type MotionState = {
+  status: "idle" | "running" | "done" | "error";
+  progress: number;
+  error: string | null;
+  peaks: MotionPeak[] | null;
+  /** Stretches of video the scan saw clearly; Bat only only drops sounds inside them. */
+  covered?: [number, number][];
+};
 
 type Ctx = {
   file: File | null;
@@ -94,7 +110,7 @@ export function useVideo(): Ctx {
   return v;
 }
 
-const DEFAULT_SETTINGS: ClipSettings = { preset: "every", threshold: -25, leadIn: 1, length: 2.5 };
+const DEFAULT_SETTINGS: ClipSettings = { preset: "every", threshold: -25, leadIn: 1, length: 2.5, batOnly: true, addSilent: false };
 const NO_MOTION: MotionState = { status: "idle", progress: 0, error: null, peaks: null };
 const DEFAULT_TRACKING: TrackingSetup = { ...DEFAULT_SETUP, stumps: null };
 
@@ -139,6 +155,24 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
     try {
       localStorage.setItem("flipper.trackingSetup", JSON.stringify(s));
     } catch {}
+  }, []);
+
+  /** Watches for bowling actions (see lib/video/motion.ts). Starts by itself once the sound is read. */
+  const runScan = useCallback((src: string, token: number) => {
+    setMotion({ status: "running", progress: 0, error: null, peaks: null });
+    scanMotion(
+      src,
+      (p) => token === loadToken.current && setMotion((m) => ({ ...m, progress: p })),
+      () => token !== loadToken.current,
+    )
+      .then((series) => {
+        if (token === loadToken.current) {
+          setMotion({ status: "done", progress: 1, error: null, peaks: motionPeaks(series), covered: coveredSpans(series) });
+        }
+      })
+      .catch((err: Error) => {
+        if (token === loadToken.current) setMotion({ status: "error", progress: 0, error: err.message, peaks: null });
+      });
   }, []);
 
   const clearFile = useCallback(() => {
@@ -190,6 +224,7 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
           setSounds(grouped);
           setFps(res.fps);
           setAudio({ status: "ready", progress: 1, error: null });
+          runScan(u, token);
         })
         .catch((err: Error) => {
           if (token !== loadToken.current) return;
@@ -200,29 +235,24 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
           });
         });
     },
-    [clearFile],
+    [clearFile, runScan],
   );
 
+  /** Retry for the bowling scan if it failed; it normally starts by itself. */
   const scanForSilentBalls = useCallback(() => {
-    if (!url || motion.status === "running") return;
-    const token = loadToken.current;
-    setMotion({ status: "running", progress: 0, error: null, peaks: null });
-    scanMotion(
-      url,
-      (p) => token === loadToken.current && setMotion((m) => ({ ...m, progress: p })),
-      () => token !== loadToken.current,
-    )
-      .then((series) => {
-        if (token === loadToken.current) setMotion({ status: "done", progress: 1, error: null, peaks: motionPeaks(series) });
-      })
-      .catch((err: Error) => {
-        if (token === loadToken.current) setMotion({ status: "error", progress: 0, error: err.message, peaks: null });
-      });
-  }, [url, motion.status]);
+    if (url && motion.status !== "running") runScan(url, loadToken.current);
+  }, [url, motion.status, runScan]);
 
   const deliveries = useMemo(
-    () => (sounds ? combineDeliveries(sounds, motion.peaks, settings.threshold) : []),
-    [sounds, motion.peaks, settings.threshold],
+    () =>
+      sounds
+        ? combineDeliveries(sounds, motion.peaks, settings.threshold, {
+            batOnly: settings.batOnly,
+            addSilent: settings.addSilent,
+            covered: motion.covered,
+          })
+        : [],
+    [sounds, motion.peaks, motion.covered, settings.threshold, settings.batOnly, settings.addSilent],
   );
 
   const clips: Clip[] = useMemo(() => {

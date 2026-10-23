@@ -454,14 +454,9 @@ export function Highlights() {
                               >
                                 {busy === `clip-${c.id}` ? "…" : "Save"}
                               </Button>
-                              <button
-                                aria-label="Remove clip"
-                                title="Remove clip"
-                                onClick={() => v.removeClip(c.id)}
-                                className="px-2 text-lg leading-none text-mute hover:text-risk"
-                              >
-                                ×
-                              </button>
+                              <Button size="sm" tone="danger" onClick={() => v.removeClip(c.id)} title="Remove this clip">
+                                Not a shot
+                              </Button>
                             </div>
                           </td>
                         </tr>
@@ -506,6 +501,19 @@ export function Highlights() {
             <p className="mt-4 text-xs text-mute">
               Every ball gets its own clip, however close together. Clips stop short of the next shot.
             </p>
+            <label className="mt-4 flex items-start gap-2 text-sm">
+              <input type="checkbox" className="mt-1" checked={v.settings.batOnly} onChange={(e) => v.setSettings({ ...v.settings, batOnly: e.target.checked })} />
+              <span>
+                <b>Bat only</b>: keep a bat sound only if the bowler bowled just before it. Drops talking, throws and
+                other nets.
+              </span>
+            </label>
+            <label className="mt-2 flex items-start gap-2 text-sm">
+              <input type="checkbox" className="mt-1" checked={v.settings.addSilent} onChange={(e) => v.setSettings({ ...v.settings, addSilent: e.target.checked })} />
+              <span>
+                <b>Add balls with no bat sound</b>: misses, leaves and bowled.
+              </span>
+            </label>
           </Panel>
           <SilentBalls />
           <Panel title="Saving videos">
@@ -598,37 +606,45 @@ function Slider({
 }
 
 /** The optional bowling-action scan: finds misses, leaves and bowled balls that made no bat sound. */
+/** Status of the bowling scan, which runs by itself after the sound is read. */
 function SilentBalls() {
-  const { motion, scanForSilentBalls, clips, audio } = useVideo();
-  const found = clips.filter((c) => c.kind === "no-sound").length;
+  const { motion, scanForSilentBalls, clips, settings, meta } = useVideo();
+  const silent = clips.filter((c) => c.kind === "no-sound").length;
+  const seenSec = (motion.covered ?? []).reduce((a, [x, y]) => a + (y - x), 0);
+  const seen = meta?.duration ? seenSec / meta.duration : 1;
   return (
-    <Panel title="Balls with no bat sound">
+    <Panel title="Bowler check">
       <p className="text-sm text-slate">
-        Misses, leaves and balls that beat the bat make little sound. Scanning watches for the bowler&apos;s action
-        instead, and adds a clip for every ball that had no bat sound.
+        Flipper also watches for the bowler&apos;s action, so a clip is only made when someone actually bowled.
       </p>
       {motion.status === "running" ? (
         <div className="mt-3 space-y-2">
-          <p className="text-sm text-slate">Watching for bowling actions… {Math.round(motion.progress * 100)}%</p>
+          <p className="text-sm text-slate">
+            Watching for bowling actions… {Math.round(motion.progress * 100)}%. Until it finishes, every bat sound is shown.
+          </p>
           <Meter value={motion.progress} max={1} />
         </div>
+      ) : motion.status === "done" && seen < 0.8 ? (
+        <>
+          <p className="mt-3 text-sm text-warn">
+            The browser only showed part of the video ({Math.round(seen * 100)}%), usually because Flipper wasn&apos;t on
+            screen. Bat sounds in the parts it couldn&apos;t see are all kept. Keep this page open and on screen, then:
+          </p>
+          <Button className="mt-2" size="sm" tone="navy" onClick={scanForSilentBalls}>Check again</Button>
+        </>
       ) : motion.status === "done" ? (
         <p className="mt-3 text-sm text-ink">
-          <b>{found}</b> {found === 1 ? "ball" : "balls"} with no bat sound added, tagged <Tag tone="gold">No bat sound</Tag>.
-          Remove any that aren&apos;t a delivery.
+          Done. {settings.batOnly ? "Only bat sounds after a bowling action are kept." : "Bat only is off: every bat sound is kept."}
+          {settings.addSilent ? ` ${silent} ${silent === 1 ? "ball" : "balls"} with no bat sound added.` : ""}
         </p>
-      ) : (
+      ) : motion.status === "error" ? (
         <>
-          <Button className="mt-3" size="sm" tone="navy" disabled={audio.status === "loading"} onClick={scanForSilentBalls}>
-            Scan for bowling actions
-          </Button>
-          <p className="mt-2 text-xs text-mute">
-            Plays the video fast in the background, about an eighth of its length. Works best filmed from behind the
-            bowler or the batter, with the camera still.
-          </p>
+          <p className="mt-3 text-sm text-risk">{motion.error} Every bat sound is shown instead.</p>
+          <Button className="mt-2" size="sm" tone="navy" onClick={scanForSilentBalls}>Try again</Button>
         </>
+      ) : (
+        <p className="mt-3 text-sm text-mute">Starts once the sound has been read.</p>
       )}
-      {motion.status === "error" ? <p className="mt-3 text-sm text-risk">{motion.error}</p> : null}
     </Panel>
   );
 }

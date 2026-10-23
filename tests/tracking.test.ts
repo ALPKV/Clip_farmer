@@ -137,6 +137,10 @@ test("adds balls with no bat sound from bowling actions", () => {
   const peaks = motionPeaks({ t, m });
   assert.deepEqual(peaks.map((p) => Math.round(p.t)), [5, 12]);
   // The bowler at 5 s is followed by a bat sound; the one at 12 s is not.
-  const out = combineDeliveries([{ contact: 6.0, levelDb: -3, rel: 0 }], peaks, -25);
+  const out = combineDeliveries([{ contact: 6.0, levelDb: -3, rel: 0 }], peaks, -25, { addSilent: true });
   assert.deepEqual(out.map((d) => [d.kind, Math.round(d.t * 10) / 10]), [["bat", 6], ["no-sound", 12.9]]);
+  // Bat only: a sound with no bowler before it (talk, a throw back) is dropped.
+  const sounds = [6.0, 9.5].map((contact) => ({ contact, levelDb: -3, rel: 0 }));
+  assert.deepEqual(combineDeliveries(sounds, peaks, -25, { batOnly: true }).map((d) => d.t), [6]);
+  assert.deepEqual(combineDeliveries(sounds, peaks, -25).map((d) => d.t), [6, 9.5]);
 });

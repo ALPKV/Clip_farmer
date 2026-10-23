@@ -18,7 +18,7 @@ export async function scanMotion(
   video.preload = "auto";
   video.src = src;
   Object.assign(video.style, {
-    position: "fixed", left: "0", top: "0", width: "2px", height: "2px", opacity: "0", pointerEvents: "none",
+    position: "fixed", left: "0", bottom: "0", width: "16px", height: "16px", opacity: "0.01", pointerEvents: "none", zIndex: "1",
   });
   document.body.appendChild(video);
   try {
@@ -46,13 +46,14 @@ export async function scanMotion(
       const px = ctx.getImageData(0, 0, w, h).data;
       const gray = new Uint8Array(w * h);
       for (let i = 0, p = 0; i < gray.length; i++, p += 4) gray[i] = (px[p] + 2 * px[p + 1] + px[p + 2]) >> 2;
-      if (prev) {
+      // Frames far apart (the page was in the background) can't show a bowling action: skip the pair.
+      if (prev && time - prevT <= 0.3) {
         let moved = 0;
         for (let i = 0; i < gray.length; i++) if (Math.abs(gray[i] - prev[i]) > 20) moved++;
         out.t.push(time);
         out.m.push(moved / gray.length);
-        gaps.push(time - prevT);
       }
+      if (prev) gaps.push(time - prevT);
       prev = gray;
       prevT = time;
       lastSample = Date.now();
@@ -63,7 +64,14 @@ export async function scanMotion(
     // slow down when it starts skipping (big gaps would exaggerate the motion).
     video.playbackRate = 8;
     let stalled: (() => void) | null = null;
+    // In the background (another app, a hidden tab) browsers stop playing video. Wait instead of
+    // failing, and carry on when the page is visible again.
+    const resume = () => {
+      if (!document.hidden && video.paused && !video.ended) void video.play().catch(() => {});
+    };
+    document.addEventListener("visibilitychange", resume);
     const tune = setInterval(() => {
+      if (document.hidden) lastSample = Date.now();
       if (Date.now() - lastSample > 10_000) stalled?.();
       if (gaps.length < 5) return;
       const recent = gaps.slice(-10).sort((a, b) => a - b)[Math.min(4, gaps.length - 1)];
@@ -107,6 +115,7 @@ export async function scanMotion(
       });
     } finally {
       clearInterval(tune);
+      document.removeEventListener("visibilitychange", resume);
     }
     onProgress?.(1);
     return out;
